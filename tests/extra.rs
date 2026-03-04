@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use rushdown::{new_markdown_to_html, parser, renderer::html, test::MarkdownTestSuite};
 
@@ -12,7 +12,8 @@ fn data_path(name: &str) -> PathBuf {
 #[test]
 fn test_extra() {
     let path = data_path("extra.txt");
-    let suite = MarkdownTestSuite::from_file(path.to_str().unwrap()).unwrap();
+    let s = fs::read_to_string(&path).expect("failed to read spec.json");
+    let suite = MarkdownTestSuite::with_str(s.as_str()).unwrap();
     let markdown_to_html = new_markdown_to_html(
         parser::Options::default(),
         html::Options {

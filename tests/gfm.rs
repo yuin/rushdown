@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use rushdown::{
     as_kind_data,
@@ -20,7 +20,8 @@ fn data_path(name: &str) -> PathBuf {
 #[test]
 fn test_linkify() {
     let path = data_path("linkify.txt");
-    let suite = MarkdownTestSuite::from_file(path.to_str().unwrap()).unwrap();
+    let s = fs::read_to_string(&path).expect("failed to read spec.json");
+    let suite = MarkdownTestSuite::with_str(s.as_str()).unwrap();
     let markdown_to_html = new_markdown_to_html(
         parser::Options::default(),
         html::Options {
@@ -77,7 +78,8 @@ fn test_linkify_scanner() {
 #[test]
 fn test_strikethrough() {
     let path = data_path("strikethrough.txt");
-    let suite = MarkdownTestSuite::from_file(path.to_str().unwrap()).unwrap();
+    let s = fs::read_to_string(&path).expect("failed to read spec.json");
+    let suite = MarkdownTestSuite::with_str(s.as_str()).unwrap();
     let markdown_to_html = new_markdown_to_html(
         parser::Options::default(),
         html::Options {
@@ -94,7 +96,8 @@ fn test_strikethrough() {
 #[test]
 fn test_table() {
     let path = data_path("table.txt");
-    let suite = MarkdownTestSuite::from_file(path.to_str().unwrap()).unwrap();
+    let s = fs::read_to_string(&path).expect("failed to read spec.json");
+    let suite = MarkdownTestSuite::with_str(s.as_str()).unwrap();
     let markdown_to_html = new_markdown_to_html(
         parser::Options::default(),
         html::Options {
@@ -111,7 +114,8 @@ fn test_table() {
 #[test]
 fn test_task_list_item() {
     let path = data_path("task_list_item.txt");
-    let suite = MarkdownTestSuite::from_file(path.to_str().unwrap()).unwrap();
+    let s = fs::read_to_string(&path).expect("failed to read spec.json");
+    let suite = MarkdownTestSuite::with_str(s.as_str()).unwrap();
     let markdown_to_html = new_markdown_to_html(
         parser::Options::default(),
         html::Options {

@@ -449,16 +449,20 @@ macro_rules! as_type_data_mut {
 
 // debug stuff {{{
 
-#[cfg(all(not(feature = "std"), feature = "no-std-unix-debug"))]
+#[cfg(not(feature = "std"))]
 pub mod debug {
+    #[cfg(feature = "no-std-unix-debug")]
     extern crate libc;
+
     use core::fmt::{self, Write};
 
     #[allow(dead_code)]
     pub struct Stdout;
 
     impl Write for Stdout {
+        #[allow(unreachable_code, unused)]
         fn write_str(&mut self, s: &str) -> fmt::Result {
+            #[cfg(feature = "no-std-unix-debug")]
             unsafe {
                 libc::write(1, s.as_ptr() as *const _, s.len());
             }
@@ -482,5 +486,4 @@ pub mod debug {
         }};
     }
 }
-
 // }}}

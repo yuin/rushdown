@@ -195,6 +195,7 @@
     "markdown": "&nbsp; &amp; &copy; &AElig; &Dcaron;\n&frac34; &HilbertSpace; &DifferentialD;\n&ClockwiseContourIntegral; &ngE;\n",
     "html": "<p>  &amp; © Æ Ď\n¾ ℋ ⅆ\n∲ ≧̸</p>\n",
     "example": 25,
+    "html_entities": true,
     "start_line": 649,
     "end_line": 657,
     "section": "Entity and numeric character references"

@@ -4,7 +4,7 @@ extern crate alloc;
 
 use crate::parser::parse_attributes;
 #[allow(unused_imports)]
-#[cfg(all(not(feature = "std"), feature = "no-std-unix-debug"))]
+#[cfg(not(feature = "std"))]
 use crate::println;
 
 use crate::text;
@@ -159,14 +159,8 @@ impl MarkdownTestSuite {
         Self { cases }
     }
 
-    /// Creates a new Markdown test cases from the given file.
-    pub fn from_file(file: &str) -> Result<Self> {
-        let Ok(content) = read_file(file) else {
-            return Err(Error::io(
-                format!("failed to read test cases from file: {}", file),
-                None,
-            ));
-        };
+    /// Creates a new Markdown test cases from the given string.
+    pub fn with_str(content: &str) -> Result<Self> {
         let mut cases: Vec<MarkdownTestCase> = Vec::new();
         let raw_cases: Vec<&str> = content.split(CASE_SEPARATOR).collect();
 
@@ -388,57 +382,7 @@ pub fn diff_pretty(v1: &str, v2: &str) -> String {
 // }}} diff
 
 // utils {{{
-
-#[allow(unreachable_code)]
-fn read_file(path: &str) -> Result<String> {
-    #[cfg(feature = "no-std-unix-debug")]
-    {
-        extern crate libc;
-
-        let mut c_path = path.as_bytes().to_vec();
-        c_path.push(0);
-        let c_path_ptr = c_path.as_ptr() as *const libc::c_char;
-
-        unsafe {
-            let fd = libc::open(c_path_ptr, libc::O_RDONLY);
-            if fd < 0 {
-                return Err(Error::io(format!("Failed to open file: {}", path), None));
-            }
-
-            let mut out: Vec<u8> = Vec::new();
-            let mut buf = [0u8; 8192];
-
-            loop {
-                let n = libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len());
-                if n < 0 {
-                    let _ = libc::close(fd);
-                    return Err(Error::io(format!("Failed to read file: {}", path), None));
-                }
-                if n == 0 {
-                    break;
-                }
-                out.extend_from_slice(&buf[..n as usize]);
-            }
-
-            if libc::close(fd) < 0 {
-                return Err(Error::io(format!("Failed to close file: {}", path), None));
-            }
-
-            return Ok(String::from_utf8_lossy(&out).to_string());
-        }
-    }
-
-    #[cfg(feature = "std")]
-    {
-        use std::fs;
-        return fs::read_to_string(path)
-            .map_err(|e| Error::io(format!("Failed to read file: {}", path), Some(Box::new(e))));
-    }
-
-    panic!("read_file is not implemented for no-std without std feature");
-}
-
-#[allow(unreachable_code)]
+#[allow(unreachable_code, unused)]
 fn get_env(key: &str) -> Option<String> {
     #[cfg(feature = "no-std-unix-debug")]
     unsafe {
@@ -469,7 +413,7 @@ fn get_env(key: &str) -> Option<String> {
         return std::env::var(key).ok();
     }
 
-    panic!("get_env is not implemented for no-std without std feature");
+    None
 }
 
 fn hex_val(b: u8) -> Option<u8> {

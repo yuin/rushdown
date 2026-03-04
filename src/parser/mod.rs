@@ -106,7 +106,7 @@ use crate::util::{HashMap, HashSet, Prioritized};
 use bitflags::bitflags;
 
 #[allow(unused_imports)]
-#[cfg(all(not(feature = "std"), feature = "no-std-unix-debug"))]
+#[cfg(not(feature = "std"))]
 use crate::println;
 
 // Context {{{

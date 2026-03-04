@@ -55,6 +55,14 @@ fn test_commonmark_spec() {
             expected,
             MarkdownTestCaseOptions::default(),
         );
+
+        if cfg!(not(feature = "html-entities")) {
+            match no {
+                25 | 32 | 33 | 34 | 35 | 36 | 503 => continue,
+                _ => (),
+            }
+        }
+
         if target_cases.contains(&no) || target_cases.is_empty() {
             test_case.execute(&markdown_to_html);
             println!("Test case {} passed", no);
