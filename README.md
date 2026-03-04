@@ -1,4 +1,6 @@
 # rushdown
+[![Tests](https://github.com/yuin/rushdown/actions/workflows/test.yml/badge.svg)](https://github.com/yuin/rushdown/actions/workflows/test.yml) [![Docs](https://docs.rs/rushdown/badge.svg)](https://docs.rs/rushdown) [![Crates.io](https://img.shields.io/crates/v/rushdown.svg?maxAge=2592000)](https://crates.io/crates/rushdown)
+
 A markdown parser written in Rust. Fast, Easy to extend, Standards-compliant.
 
 rushdown is compliant with CommonMark 0.31.2 & [GitHub Flavored Markdown](https://github.github.com/gfm/)[^gfm-support].
