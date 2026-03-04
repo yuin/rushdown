@@ -1,0 +1,31 @@
+name: Test
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.rust }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, beta, nightly]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (${{ matrix.rust }})
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - name: Run Tests (std)
+        run: cargo test -- --nocapture --test-threads=1
+        env:
+          RUST_BACKTRACE: 1 
+      - name: Run Tests (no-std)
+        run: cargo test --no-default-features --features no-std-unix-debug,html-entities -- --nocapture --test-threads=1
+        env:
+          RUST_BACKTRACE: 1 
