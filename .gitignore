@@ -3,3 +3,4 @@ profile*.svg
 profile.pb
 benches/cmark-master
 benches/cmark_benchmark*
+lcov.info

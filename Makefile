@@ -9,7 +9,7 @@ test-nostd: scanner ## Run tests for no-std
 
 .PHONY: test-std
 test-std: scanner ## Run tests for std
-	RUST_BACKTRACE=1 cargo test -- --nocapture --test-threads=1
+	yes | RUST_BACKTRACE=1 cargo llvm-cov --branch --ignore-filename-regex='test.rs|gen.rs' -- --nocapture --test-threads=1
 
 .PHONY: fuzz
 fuzz: scanner ## Run fuzz tests
