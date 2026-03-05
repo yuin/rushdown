@@ -109,7 +109,6 @@ use core::result::Result as CoreResult;
 
 use crate::error::*;
 use crate::text;
-use crate::util::HashMap;
 
 use bitflags::bitflags;
 
@@ -717,21 +716,21 @@ impl IndexMut<NodeRef> for Arena {
 /// A map of text values associated with string keys.
 #[derive(Default)]
 pub struct TextMap {
-    store: HashMap<String, text::Value>,
+    store: Vec<(String, text::Value)>,
 }
 
 impl Debug for TextMap {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_map().entries(self.store.iter()).finish()
+        f.debug_map()
+            .entries(self.store.iter().map(|(k, v)| (k, v)))
+            .finish()
     }
 }
 
 impl TextMap {
     /// Creates a new, empty TextMap.
     pub fn new() -> Self {
-        Self {
-            store: HashMap::new(),
-        }
+        Self { store: Vec::new() }
     }
 
     /// Clears all entries in the TextMap.
@@ -741,48 +740,56 @@ impl TextMap {
 
     /// Checks if the TextMap contains the specified key.
     pub fn contains_key(&self, key: &str) -> bool {
-        self.store.contains_key(key)
+        self.store.iter().any(|(k, _)| k == key)
     }
 
     /// Gets a reference to the value associated with the specified key.
     pub fn get(&self, key: &str) -> Option<&text::Value> {
-        self.store.get(key)
+        self.store
+            .iter()
+            .find_map(|(k, v)| if k == key { Some(v) } else { None })
     }
 
     /// Gets a mutable reference to the value associated with the specified key.
     pub fn set(&mut self, key: impl Into<String>, value: impl Into<text::Value>) {
-        self.store.insert(key.into(), value.into());
+        let key = key.into();
+        let value = value.into();
+        if let Some((_, v)) = self.store.iter_mut().find(|(k, _)| k == &key) {
+            *v = value;
+        } else {
+            self.store.push((key, value));
+        }
     }
 
-    /// Removes the entry associated with the specified key.
+    /// Returns true if the TextMap contains no entries.
     pub fn is_empty(&self) -> bool {
         self.store.is_empty()
     }
 
     /// Returns an iterator over the entries in the TextMap.
     pub fn iter(&self) -> impl Iterator<Item = (&String, &text::Value)> {
-        self.store.iter()
+        self.store.iter().map(|(k, v)| (k, v))
     }
 
     /// Returns a mutable iterator over the entries in the TextMap.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&String, &mut text::Value)> {
-        self.store.iter_mut()
+        self.store.iter_mut().map(|(k, v)| (k as &String, v))
     }
 
     /// Returns an iterator over the keys in the TextMap.
     pub fn keys(&self) -> impl Iterator<Item = &String> {
-        self.store.keys()
+        self.store.iter().map(|(k, _)| k)
     }
 
     /// Returns an iterator over the values in the TextMap.
     pub fn values(&self) -> impl Iterator<Item = &text::Value> {
-        self.store.values()
+        self.store.iter().map(|(_, v)| v)
     }
 }
 
-pub struct TextMapIntoIter(<HashMap<String, text::Value> as IntoIterator>::IntoIter);
-pub struct TextMapIter<'a>(<&'a HashMap<String, text::Value> as IntoIterator>::IntoIter);
-pub struct TextMapIterMut<'a>(<&'a mut HashMap<String, text::Value> as IntoIterator>::IntoIter);
+pub struct TextMapIntoIter(<Vec<(String, text::Value)> as IntoIterator>::IntoIter);
+pub struct TextMapIter<'a>(<&'a Vec<(String, text::Value)> as IntoIterator>::IntoIter);
+pub struct TextMapIterMut<'a>(<&'a mut Vec<(String, text::Value)> as IntoIterator>::IntoIter);
 
 impl IntoIterator for TextMap {
     type Item = (String, text::Value);
@@ -798,7 +805,7 @@ impl<'a> IntoIterator for &'a TextMap {
     type IntoIter = TextMapIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        TextMapIter((&self.store).into_iter())
+        TextMapIter(self.store.iter())
     }
 }
 
@@ -807,7 +814,7 @@ impl<'a> IntoIterator for &'a mut TextMap {
     type IntoIter = TextMapIterMut<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        TextMapIterMut((&mut self.store).into_iter())
+        TextMapIterMut(self.store.iter_mut())
     }
 }
 
@@ -822,20 +829,21 @@ impl<'a> Iterator for TextMapIter<'a> {
     type Item = (&'a String, &'a text::Value);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
+        self.0.next().map(|(k, v)| (k, v))
     }
 }
+
 impl<'a> Iterator for TextMapIterMut<'a> {
     type Item = (&'a String, &'a mut text::Value);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
+        self.0.next().map(|(k, v)| (k as &String, v))
     }
 }
 
 impl FromIterator<(String, text::Value)> for TextMap {
     fn from_iter<T: IntoIterator<Item = (String, text::Value)>>(iter: T) -> Self {
-        let mut store = HashMap::new();
+        let mut store = Vec::new();
         store.extend(iter);
         Self { store }
     }

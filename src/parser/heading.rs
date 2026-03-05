@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::cmp::min;
 
-use crate::ast::{Arena, Attributes, Heading, NodeRef, Paragraph};
+use crate::ast::{Arena, Attributes, Heading, NodeRef};
 use crate::parser::{parse_attributes, BlockParser, Context, Options, State};
 use crate::text::{BlockReader, Reader as _, Segment, EOS};
 use crate::util::{
@@ -205,30 +205,14 @@ impl BlockParser for SetextHeadingParser {
         let Some(paragraph_ref) = ctx.remove(self.temporary_paragraph) else {
             return;
         };
-        let mut segment: Segment;
         {
             let hblk = as_type_data_mut!(arena, node_ref, Block);
-            segment = *hblk.lines().first().unwrap();
             hblk.remove_line(0);
         }
-        if as_type_data!(arena, paragraph_ref, Block)
+        if !as_type_data!(arena, paragraph_ref, Block)
             .lines()
             .is_empty()
         {
-            let next_opt = arena[node_ref].next_sibling();
-            segment = segment.trim_left_space(reader.source());
-            if next_opt.is_none() || !matches_kind!(arena, next_opt.unwrap(), Paragraph) {
-                let p = arena.new_node(Paragraph::new());
-                as_type_data_mut!(arena, p, Block).append_line(segment);
-                arena[node_ref]
-                    .parent()
-                    .unwrap()
-                    .insert_after(arena, node_ref, p);
-            } else if let Some(next_ref) = next_opt {
-                as_type_data_mut!(arena, next_ref, Block).unshift_line(segment);
-            }
-            node_ref.delete(arena);
-        } else {
             let has_blank_previous_line: bool;
             let lines: Vec<Segment>;
             {

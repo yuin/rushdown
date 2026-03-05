@@ -12,7 +12,7 @@ fn data_path(name: &str) -> PathBuf {
 #[test]
 fn test_extra() {
     let path = data_path("extra.txt");
-    let s = fs::read_to_string(&path).expect("failed to read spec.json");
+    let s = fs::read_to_string(&path).expect("failed to read extra.txt");
     let suite = MarkdownTestSuite::with_str(s.as_str()).unwrap();
     let markdown_to_html = new_markdown_to_html(
         parser::Options::default(),

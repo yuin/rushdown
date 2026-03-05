@@ -18,7 +18,7 @@ use crate::{as_kind_data, as_type_data, matches_kind};
 // FormatOptions {{{
 
 /// Common options for rendering HTML.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Options {
     /// Renders soft line breaks as hard line breaks (`<br />`).
     pub hard_wraps: bool,
@@ -34,6 +34,19 @@ pub struct Options {
 
     /// Attribute filters for rendering.
     pub attribute_filters: Option<Rc<AttributeFilters>>,
+}
+
+impl Default for Options {
+    /// Creates default options for HTML rendering.
+    fn default() -> Self {
+        Self {
+            hard_wraps: false,
+            xhtml: false,
+            allows_unsafe: false,
+            escaped_space: false,
+            attribute_filters: Some(Rc::new(AttributeFilters::default())),
+        }
+    }
 }
 
 impl FormatOptions for Options {}
@@ -1104,9 +1117,11 @@ pub fn render_attributes<W: TextWrite>(
     valid: Option<&AsciiWordSet>,
 ) -> Result<()> {
     for (key, value) in attributes.iter() {
-        if let Some(valid_set) = valid {
-            if !valid_set.contains(key.as_str()) {
-                continue;
+        if !key.starts_with("data-") && !key.starts_with("aria-") {
+            if let Some(valid_set) = valid {
+                if !valid_set.contains(key.as_str()) {
+                    continue;
+                }
             }
         }
         w.write_str(" ")?;
