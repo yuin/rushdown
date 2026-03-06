@@ -179,6 +179,27 @@ impl Context {
         }
     }
 
+    /// Gets or inserts a value in the context.
+    /// If the key does not exist, inserts the default value and returns a reference to it.
+    /// Otherwise, returns a reference to the existing value.
+    pub fn get_or_insert<T: AnyValueSpec>(
+        &mut self,
+        key: ContextKey<T>,
+        default: impl FnOnce() -> T::Item,
+    ) -> &T::Item {
+        if self.values.len() <= key.key() {
+            panic!(
+                "ContextKey index {} is out of bounds (current size: {})",
+                key.key(),
+                self.values.len()
+            );
+        }
+        if self.values[key.key()].is_none() {
+            self.values[key.key()] = Some(T::to_any_value(default()));
+        }
+        T::from_any_value(self.values[key.key()].as_ref().unwrap())
+    }
+
     /// Gets a mutable reference to a value from the context.
     pub fn get_mut<T: AnyValueSpec>(&mut self, key: ContextKey<T>) -> Option<&mut T::Item> {
         if self.values.len() <= key.key() {
@@ -189,6 +210,27 @@ impl Context {
         } else {
             None
         }
+    }
+
+    /// Gets or inserts a mutable reference to a value in the context.
+    /// If the key does not exist, inserts the default value and returns a mutable reference to it.
+    /// Otherwise, returns a mutable reference to the existing value.
+    pub fn get_or_insert_mut<T: AnyValueSpec>(
+        &mut self,
+        key: ContextKey<T>,
+        default: impl FnOnce() -> T::Item,
+    ) -> &mut T::Item {
+        if self.values.len() <= key.key() {
+            panic!(
+                "ContextKey index {} is out of bounds (current size: {})",
+                key.key(),
+                self.values.len()
+            );
+        }
+        if self.values[key.key()].is_none() {
+            self.values[key.key()] = Some(T::to_any_value(default()));
+        }
+        T::from_any_value_mut(self.values[key.key()].as_mut().unwrap())
     }
 
     /// Removes a value from the context.

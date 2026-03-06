@@ -928,7 +928,12 @@ impl<'r, W: TextWrite> Renderer<'r, W> {
         let helper = RendererHelper::new(options.clone(), BuiltinNodesRenderer::new(options));
         let mut s = Self { helper };
         ext.apply(&mut s);
+        s.init();
         s
+    }
+
+    fn init(&mut self) {
+        self.helper.init();
     }
 
     /// Add a custom node renderer.
@@ -939,6 +944,26 @@ impl<'r, W: TextWrite> Renderer<'r, W> {
         R: NodeRenderer<'r, W>,
     {
         self.helper.add_node_renderer(f, ropt);
+    }
+
+    /// Adds a pre-render hook that will be called before rendering starts.
+    pub fn add_pre_render_hook<A, T, R, F>(&mut self, f: F, ropt: T, priority: u32)
+    where
+        T: RendererOptions,
+        F: RendererConstructor<A, Options, T, R>,
+        R: PreRender<W> + 'r,
+    {
+        self.helper.add_pre_render_hook(f, ropt, priority);
+    }
+
+    /// Adds a post-render hook that will be called after rendering is done.
+    pub fn add_post_render_hook<A, T, R, F>(&mut self, f: F, ropt: T, priority: u32)
+    where
+        T: RendererOptions,
+        F: RendererConstructor<A, Options, T, R>,
+        R: PostRender<W> + 'r,
+    {
+        self.helper.add_post_render_hook(f, ropt, priority);
     }
 
     /// Render the AST to the given writer.

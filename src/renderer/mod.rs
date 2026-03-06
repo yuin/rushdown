@@ -17,7 +17,7 @@ use alloc::rc::Rc;
 use crate::ast::{self, *};
 use crate::context::{self, AnyValueSpec, ContextKey, ContextKeyRegistry};
 use crate::error::{CallbackError, Error, Result};
-use crate::util::HashMap;
+use crate::util::{HashMap, Prioritized};
 
 #[allow(unused_imports)]
 #[cfg(all(not(feature = "std"), feature = "no-std-unix-debug"))]
@@ -327,6 +327,12 @@ pub struct RendererHelper<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> {
     context_key_registry: Rc<RefCell<ContextKeyRegistry>>,
     node_renderers: Vec<Option<BoxRenderNode<'r, W>>>,
 
+    tmp_pre_render_hooks: Option<Vec<Prioritized<BoxPreRender<'r, W>>>>,
+    pre_render_hooks: Option<Vec<BoxPreRender<'r, W>>>,
+
+    tmp_post_render_hooks: Option<Vec<Prioritized<BoxPostRender<'r, W>>>>,
+    post_render_hooks: Option<Vec<BoxPostRender<'r, W>>>,
+
     builtin_node_renderer: B,
 
     document_override: bool,
@@ -425,6 +431,10 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
             node_kinds: Rc::new(RefCell::new(NodeKindRegistry::default())),
             context_key_registry: Rc::new(RefCell::new(ContextKeyRegistry::default())),
             node_renderers: Vec::new(),
+            tmp_pre_render_hooks: None,
+            pre_render_hooks: None,
+            tmp_post_render_hooks: None,
+            post_render_hooks: None,
             builtin_node_renderer,
             document_override: false,
             paragraph_override: false,
@@ -453,6 +463,27 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
         }
     }
 
+    /// Initializes the renderer helper.
+    ///
+    /// Renderer implementations should call this method in their constructors.
+    pub fn init(&mut self) {
+        self.node_kinds.borrow_mut().freeze();
+        if let Some(mut tmp_hooks) = self.tmp_pre_render_hooks.take() {
+            tmp_hooks.sort();
+            self.pre_render_hooks = Some(Vec::with_capacity(tmp_hooks.len()));
+            for mut h in tmp_hooks.drain(..) {
+                self.pre_render_hooks.as_mut().unwrap().push(h.take());
+            }
+        }
+        if let Some(mut tmp_hooks) = self.tmp_post_render_hooks.take() {
+            tmp_hooks.sort();
+            self.post_render_hooks = Some(Vec::with_capacity(tmp_hooks.len()));
+            for mut h in tmp_hooks.drain(..) {
+                self.post_render_hooks.as_mut().unwrap().push(h.take());
+            }
+        }
+    }
+
     /// Adds a node renderer.
     ///
     /// `F` is a function or closure that constructs a node renderer.
@@ -478,6 +509,68 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
         renderer.register_node_renderer_fn(self)
     }
 
+    /// Adds a pre render hook.
+    ///
+    /// `F` is a function or closure that constructs a node renderer.
+    /// F can take 0 to 4 arguments, each of which can be one of the following types:
+    ///
+    /// - `()`
+    /// - `O`: The format options type.
+    /// - `T`: The renderer options type.
+    /// - `Rc<RefCell<ContextKeyRegistry>>`
+    /// - `Rc<RefCell<NodeKindRegistry>>`
+    pub fn add_pre_render_hook<A, T, R, F>(&mut self, f: F, ropt: T, priority: u32)
+    where
+        T: RendererOptions,
+        F: RendererConstructor<A, O, T, R>,
+        R: PreRender<W> + 'r,
+    {
+        let hook = f.call(&RendererConstructorOptions {
+            format_options: self.format_options.clone(),
+            context_registry: self.context_key_registry.clone(),
+            node_kind_registry: self.node_kinds.clone(),
+            ropt: Cell::new(Some(ropt)),
+        });
+        if self.tmp_pre_render_hooks.is_none() {
+            self.tmp_pre_render_hooks = Some(Vec::new());
+        }
+        self.tmp_pre_render_hooks
+            .as_mut()
+            .unwrap()
+            .push(Prioritized::new(BoxPreRender::new(hook), priority));
+    }
+
+    /// Adds a post render hook.
+    ///
+    /// `F` is a function or closure that constructs a node renderer.
+    /// F can take 0 to 4 arguments, each of which can be one of the following types:
+    ///
+    /// - `()`
+    /// - `O`: The format options type.
+    /// - `T`: The renderer options type.
+    /// - `Rc<RefCell<ContextKeyRegistry>>`
+    /// - `Rc<RefCell<NodeKindRegistry>>`
+    pub fn add_post_render_hook<A, T, R, F>(&mut self, f: F, ropt: T, priority: u32)
+    where
+        T: RendererOptions,
+        F: RendererConstructor<A, O, T, R>,
+        R: PostRender<W> + 'r,
+    {
+        let hook = f.call(&RendererConstructorOptions {
+            format_options: self.format_options.clone(),
+            context_registry: self.context_key_registry.clone(),
+            node_kind_registry: self.node_kinds.clone(),
+            ropt: Cell::new(Some(ropt)),
+        });
+        if self.tmp_post_render_hooks.is_none() {
+            self.tmp_post_render_hooks = Some(Vec::new());
+        }
+        self.tmp_post_render_hooks
+            .as_mut()
+            .unwrap()
+            .push(Prioritized::new(BoxPostRender::new(hook), priority));
+    }
+
     /// Renders the AST to the given writer.
     pub fn render<'a>(
         &self,
@@ -489,6 +582,11 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
         let context = &mut Context::new();
         let reg = self.context_key_registry.borrow();
         context.initialize(&reg);
+        if let Some(pre_hooks) = &self.pre_render_hooks {
+            for hook in pre_hooks {
+                hook.pre_render(writer, source, arena, node_ref, context)?;
+            }
+        }
         walk(
             arena,
             node_ref,
@@ -503,7 +601,13 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
         .map_err(|e| match e {
             CallbackError::Internal(err) => err,
             CallbackError::Callback(err) => err,
-        })
+        })?;
+        if let Some(post_hooks) = &self.post_render_hooks {
+            for hook in post_hooks {
+                hook.post_render(writer, source, arena, node_ref, context)?;
+            }
+        }
+        Ok(())
     }
 
     fn render_node<'a>(
@@ -1069,7 +1173,91 @@ pub trait BuiltinNodesRenderer<W> {
 
 // }}} BuiltinNodesRenderer
 
-// RenderNode {{{
+// Hook & RenderNode {{{
+
+/// A trait for pre-rendering nodes.
+pub trait PreRender<W> {
+    fn pre_render(
+        &self,
+        writer: &mut W,
+        source: &str,
+        arena: &Arena,
+        node_ref: NodeRef,
+        context: &mut Context,
+    ) -> Result<()>;
+}
+
+impl<F, W> PreRender<W> for F
+where
+    F: Fn(&mut W, &str, &Arena, NodeRef, &mut Context) -> Result<()>,
+{
+    fn pre_render(
+        &self,
+        writer: &mut W,
+        source: &str,
+        arena: &Arena,
+        node_ref: NodeRef,
+        context: &mut Context,
+    ) -> Result<()> {
+        (self)(writer, source, arena, node_ref, context)
+    }
+}
+
+/// A trait for post-rendering nodes.
+pub trait PostRender<W> {
+    fn post_render(
+        &self,
+        writer: &mut W,
+        source: &str,
+        arena: &Arena,
+        node_ref: NodeRef,
+        context: &mut Context,
+    ) -> Result<()>;
+}
+
+impl<F, W> PostRender<W> for F
+where
+    F: Fn(&mut W, &str, &Arena, NodeRef, &mut Context) -> Result<()>,
+{
+    fn post_render(
+        &self,
+        writer: &mut W,
+        source: &str,
+        arena: &Arena,
+        node_ref: NodeRef,
+        context: &mut Context,
+    ) -> Result<()> {
+        (self)(writer, source, arena, node_ref, context)
+    }
+}
+
+/// A boxed pre-render function.
+pub struct BoxPreRender<'r, W>(Box<dyn PreRender<W> + 'r>);
+
+impl<'r, W> BoxPreRender<'r, W> {
+    /// Creates a new `BoxPreRender` from a given function or closure.
+    pub fn new(pr: impl PreRender<W> + 'r) -> Self {
+        BoxPreRender(Box::new(pr))
+    }
+
+    #[inline(always)]
+    pub fn pre_render(
+        &self,
+        writer: &mut W,
+        source: &str,
+        arena: &Arena,
+        node_ref: NodeRef,
+        context: &mut Context,
+    ) -> Result<()> {
+        self.0.pre_render(writer, source, arena, node_ref, context)
+    }
+}
+
+impl<W> Debug for BoxPreRender<'_, W> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "BoxPreRender")
+    }
+}
 
 /// Traits for rendering nodes.
 pub trait RenderNode<W> {
@@ -1098,6 +1286,34 @@ where
         context: &mut Context,
     ) -> Result<WalkStatus> {
         (self)(writer, source, arena, node_ref, entering, context)
+    }
+}
+
+/// A boxed post-render function.
+pub struct BoxPostRender<'r, W>(Box<dyn PostRender<W> + 'r>);
+
+impl<'r, W> BoxPostRender<'r, W> {
+    /// Creates a new `BoxPostRender` from a given function or closure.
+    pub fn new(pr: impl PostRender<W> + 'r) -> Self {
+        BoxPostRender(Box::new(pr))
+    }
+
+    #[inline(always)]
+    pub fn post_render(
+        &self,
+        writer: &mut W,
+        source: &str,
+        arena: &Arena,
+        node_ref: NodeRef,
+        context: &mut Context,
+    ) -> Result<()> {
+        self.0.post_render(writer, source, arena, node_ref, context)
+    }
+}
+
+impl<W> Debug for BoxPostRender<'_, W> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "BoxPostRender")
     }
 }
 

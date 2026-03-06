@@ -408,6 +408,100 @@ where
     })
 }
 
+#[derive(Debug, Clone)]
+struct HeaderFooterHtmlRendererOptions {
+    pub header: String,
+    pub footer: String,
+}
+
+impl RendererOptions for HeaderFooterHtmlRendererOptions {}
+
+impl Default for HeaderFooterHtmlRendererOptions {
+    fn default() -> Self {
+        Self {
+            header: "<div class=\"header\">Header</div>".to_string(),
+            footer: "<div class=\"footer\">Footer</div>".to_string(),
+        }
+    }
+}
+
+struct HeaderPreRenderHook<W: TextWrite> {
+    _phantom: core::marker::PhantomData<W>,
+    writer: html::Writer,
+    options: HeaderFooterHtmlRendererOptions,
+}
+
+impl<W: TextWrite> HeaderPreRenderHook<W> {
+    fn with_options(html_opts: Options, options: HeaderFooterHtmlRendererOptions) -> Self {
+        Self {
+            _phantom: core::marker::PhantomData,
+            writer: html::Writer::with_options(html_opts),
+            options,
+        }
+    }
+}
+
+impl<W: TextWrite> PreRender<W> for HeaderPreRenderHook<W> {
+    fn pre_render(
+        &self,
+        w: &mut W,
+        _source: &str,
+        _arena: &Arena,
+        _node_ref: NodeRef,
+        _context: &mut renderer::Context,
+    ) -> Result<()> {
+        self.writer.write_html(w, self.options.header.as_str())?;
+        Ok(())
+    }
+}
+
+struct FooterPostRenderHook<W: TextWrite> {
+    _phantom: core::marker::PhantomData<W>,
+    writer: html::Writer,
+    options: HeaderFooterHtmlRendererOptions,
+}
+
+impl<W: TextWrite> FooterPostRenderHook<W> {
+    fn with_options(html_opts: Options, options: HeaderFooterHtmlRendererOptions) -> Self {
+        Self {
+            _phantom: core::marker::PhantomData,
+            writer: html::Writer::with_options(html_opts),
+            options,
+        }
+    }
+}
+
+impl<W: TextWrite> PostRender<W> for FooterPostRenderHook<W> {
+    fn post_render(
+        &self,
+        w: &mut W,
+        _source: &str,
+        _arena: &Arena,
+        _node_ref: NodeRef,
+        _context: &mut renderer::Context,
+    ) -> Result<()> {
+        self.writer.write_html(w, self.options.footer.as_str())?;
+        Ok(())
+    }
+}
+
+fn header_footer_html_renderer_extension<'cb, W>(
+    options: impl Into<HeaderFooterHtmlRendererOptions>,
+) -> impl RendererExtension<'cb, W>
+where
+    W: TextWrite + 'cb,
+{
+    RendererExtensionFn::new(move |r: &mut Renderer<'cb, W>| {
+        let options = options.into();
+        r.add_pre_render_hook(HeaderPreRenderHook::with_options, options.clone(), 0);
+        r.add_post_render_hook(
+            FooterPostRenderHook::with_options,
+            options.clone(),
+            u32::MAX,
+        );
+    })
+}
+
 // }}}
 
 #[test]
@@ -432,6 +526,12 @@ Hello @alice!
         })
         .and(adomonition_html_renderer_extension(
             AdmonitionHtmlRendererOptions::default(),
+        ))
+        .and(header_footer_html_renderer_extension(
+            HeaderFooterHtmlRendererOptions {
+                header: "<div class=\"header\">Header</div>".to_string(),
+                footer: "<div class=\"footer\">Footer</div>".to_string(),
+            },
         )),
     );
     match markdown_to_html(&mut output, input) {
@@ -443,9 +543,9 @@ Hello @alice!
 
     assert_eq!(
         output.trim(),
-        r#"<p>Hello <span class="user-mention"><strong>alice</strong></span>!</p>
+        r#"<div class="header">Header</div><p>Hello <span class="user-mention"><strong>alice</strong></span>!</p>
 <div class="markdown-alert"><p>NOTE</p>
 <p><strong>this is a note</strong></p>
-</div>"#
+</div><div class="footer">Footer</div>"#
     );
 }
