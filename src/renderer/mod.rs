@@ -6,7 +6,6 @@ extern crate alloc;
 
 use core::any::TypeId;
 use core::fmt::Debug;
-use core::result::Result as CoreResult;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -582,29 +581,17 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
         let context = &mut Context::new();
         let reg = self.context_key_registry.borrow();
         context.initialize(&reg);
+        let render = RenrererHelperRender { helper: self };
+
         if let Some(pre_hooks) = &self.pre_render_hooks {
             for hook in pre_hooks {
-                hook.pre_render(writer, source, arena, node_ref, context)?;
+                hook.pre_render(writer, source, arena, node_ref, &render, context)?;
             }
         }
-        walk(
-            arena,
-            node_ref,
-            &mut |arena: &Arena,
-                  node_ref: NodeRef,
-                  entering: bool|
-             -> CoreResult<WalkStatus, Error> {
-                self.render_node(writer, source, arena, node_ref, entering, context)
-            },
-        )
-        .map(|_| ())
-        .map_err(|e| match e {
-            CallbackError::Internal(err) => err,
-            CallbackError::Callback(err) => err,
-        })?;
+        render.render(writer, source, arena, node_ref, context)?;
         if let Some(post_hooks) = &self.post_render_hooks {
             for hook in post_hooks {
-                hook.post_render(writer, source, arena, node_ref, context)?;
+                hook.post_render(writer, source, arena, node_ref, &render, context)?;
             }
         }
         Ok(())
@@ -1175,9 +1162,9 @@ pub trait BuiltinNodesRenderer<W> {
 
 // Hook & RenderNode {{{
 
-/// A trait for pre-rendering nodes.
-pub trait PreRender<W> {
-    fn pre_render(
+/// A trait for rendering a node.
+pub trait Render<W> {
+    fn render(
         &self,
         writer: &mut W,
         source: &str,
@@ -1187,11 +1174,14 @@ pub trait PreRender<W> {
     ) -> Result<()>;
 }
 
-impl<F, W> PreRender<W> for F
-where
-    F: Fn(&mut W, &str, &Arena, NodeRef, &mut Context) -> Result<()>,
+struct RenrererHelperRender<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> {
+    helper: &'r RendererHelper<'r, W, B, O>,
+}
+
+impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> Render<W>
+    for RenrererHelperRender<'r, W, B, O>
 {
-    fn pre_render(
+    fn render(
         &self,
         writer: &mut W,
         source: &str,
@@ -1199,7 +1189,49 @@ where
         node_ref: NodeRef,
         context: &mut Context,
     ) -> Result<()> {
-        (self)(writer, source, arena, node_ref, context)
+        walk(arena, node_ref, &mut |arena: &Arena,
+                                    node_ref: NodeRef,
+                                    entering: bool|
+         -> Result<WalkStatus> {
+            self.helper
+                .render_node(writer, source, arena, node_ref, entering, context)
+        })
+        .map(|_| ())
+        .map_err(|e| match e {
+            CallbackError::Internal(err) => err,
+            CallbackError::Callback(err) => err,
+        })?;
+        Ok(())
+    }
+}
+
+/// A trait for pre-rendering nodes.
+pub trait PreRender<W> {
+    fn pre_render(
+        &self,
+        writer: &mut W,
+        source: &str,
+        arena: &Arena,
+        node_ref: NodeRef,
+        render: &dyn Render<W>,
+        context: &mut Context,
+    ) -> Result<()>;
+}
+
+impl<F, W> PreRender<W> for F
+where
+    F: Fn(&mut W, &str, &Arena, NodeRef, &dyn Render<W>, &mut Context) -> Result<()>,
+{
+    fn pre_render(
+        &self,
+        writer: &mut W,
+        source: &str,
+        arena: &Arena,
+        node_ref: NodeRef,
+        render: &dyn Render<W>,
+        context: &mut Context,
+    ) -> Result<()> {
+        (self)(writer, source, arena, node_ref, render, context)
     }
 }
 
@@ -1211,13 +1243,14 @@ pub trait PostRender<W> {
         source: &str,
         arena: &Arena,
         node_ref: NodeRef,
+        render: &dyn Render<W>,
         context: &mut Context,
     ) -> Result<()>;
 }
 
 impl<F, W> PostRender<W> for F
 where
-    F: Fn(&mut W, &str, &Arena, NodeRef, &mut Context) -> Result<()>,
+    F: Fn(&mut W, &str, &Arena, NodeRef, &dyn Render<W>, &mut Context) -> Result<()>,
 {
     fn post_render(
         &self,
@@ -1225,9 +1258,10 @@ where
         source: &str,
         arena: &Arena,
         node_ref: NodeRef,
+        render: &dyn Render<W>,
         context: &mut Context,
     ) -> Result<()> {
-        (self)(writer, source, arena, node_ref, context)
+        (self)(writer, source, arena, node_ref, render, context)
     }
 }
 
@@ -1247,15 +1281,47 @@ impl<'r, W> BoxPreRender<'r, W> {
         source: &str,
         arena: &Arena,
         node_ref: NodeRef,
+        render: &dyn Render<W>,
         context: &mut Context,
     ) -> Result<()> {
-        self.0.pre_render(writer, source, arena, node_ref, context)
+        self.0
+            .pre_render(writer, source, arena, node_ref, render, context)
     }
 }
 
 impl<W> Debug for BoxPreRender<'_, W> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "BoxPreRender")
+    }
+}
+
+/// A boxed post-render function.
+pub struct BoxPostRender<'r, W>(Box<dyn PostRender<W> + 'r>);
+
+impl<'r, W> BoxPostRender<'r, W> {
+    /// Creates a new `BoxPostRender` from a given function or closure.
+    pub fn new(pr: impl PostRender<W> + 'r) -> Self {
+        BoxPostRender(Box::new(pr))
+    }
+
+    #[inline(always)]
+    pub fn post_render(
+        &self,
+        writer: &mut W,
+        source: &str,
+        arena: &Arena,
+        node_ref: NodeRef,
+        render: &dyn Render<W>,
+        context: &mut Context,
+    ) -> Result<()> {
+        self.0
+            .post_render(writer, source, arena, node_ref, render, context)
+    }
+}
+
+impl<W> Debug for BoxPostRender<'_, W> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "BoxPostRender")
     }
 }
 
@@ -1286,34 +1352,6 @@ where
         context: &mut Context,
     ) -> Result<WalkStatus> {
         (self)(writer, source, arena, node_ref, entering, context)
-    }
-}
-
-/// A boxed post-render function.
-pub struct BoxPostRender<'r, W>(Box<dyn PostRender<W> + 'r>);
-
-impl<'r, W> BoxPostRender<'r, W> {
-    /// Creates a new `BoxPostRender` from a given function or closure.
-    pub fn new(pr: impl PostRender<W> + 'r) -> Self {
-        BoxPostRender(Box::new(pr))
-    }
-
-    #[inline(always)]
-    pub fn post_render(
-        &self,
-        writer: &mut W,
-        source: &str,
-        arena: &Arena,
-        node_ref: NodeRef,
-        context: &mut Context,
-    ) -> Result<()> {
-        self.0.post_render(writer, source, arena, node_ref, context)
-    }
-}
-
-impl<W> Debug for BoxPostRender<'_, W> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "BoxPostRender")
     }
 }
 

@@ -448,6 +448,7 @@ impl<W: TextWrite> PreRender<W> for HeaderPreRenderHook<W> {
         _source: &str,
         _arena: &Arena,
         _node_ref: NodeRef,
+        _render: &dyn Render<W>,
         _context: &mut renderer::Context,
     ) -> Result<()> {
         self.writer.write_html(w, self.options.header.as_str())?;
@@ -478,6 +479,7 @@ impl<W: TextWrite> PostRender<W> for FooterPostRenderHook<W> {
         _source: &str,
         _arena: &Arena,
         _node_ref: NodeRef,
+        _render: &dyn Render<W>,
         _context: &mut renderer::Context,
     ) -> Result<()> {
         self.writer.write_html(w, self.options.footer.as_str())?;
