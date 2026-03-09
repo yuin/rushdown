@@ -410,6 +410,10 @@ HtmlRenderer constructor function can take these arguments if needed, in any ord
 - `Rc<RefCell<rushdown::renderer::ContextKeyRegistry>>`
 - `Rc<RefCell<rushdown::renderer::NodeKindRegistry>>`
 
+## Extensions
+
+- [rushdown-footnote](https://crates.io/crates/rushdown-footnote): A footnote extension for rushdown.
+
 ## Donation
 BTC: 1NEDSyUmo4SMTDP83JJQSWi1MvQUGGNMZB
 
