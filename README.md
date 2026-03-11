@@ -158,7 +158,7 @@ match markdown_to_html(&mut output, input) {
 | `without_default_parsers` | `false` | Whether to disable default parsers. |
 | `arena` | `ArenaOptions::default()` | Options for the arena allocator. |
 | `escaped_space` | `false` | If true, a '\' escaped half-space(0x20) will not trigger parsers. |
-| `id_generator` : `None`(BasicNodeIdGenerator) | An ID generator for generating node IDs. |
+| `id_generator` | `None`(BasicNodeIdGenerator) | An ID generator for generating node IDs. |
 
 Currently only headings support attributes.
 Attributes are being discussed in the [CommonMark forum](https://talk.commonmark.org/t/consistent-attribute-syntax/272). This syntax may possibly change in the future.
@@ -414,6 +414,7 @@ HtmlRenderer constructor function can take these arguments if needed, in any ord
 
 - [rushdown-footnote](https://crates.io/crates/rushdown-footnote): A footnote extension for rushdown.
 - [rushdown-meta](https://crates.io/crates/rushdown-meta): A meta(YAML frontmatter) extension for rushdown.
+- [rushdown-emoji](https://crates.io/crates/rushdown-emoji): An emoji extension for rushdown.
 
 ## Donation
 BTC: 1NEDSyUmo4SMTDP83JJQSWi1MvQUGGNMZB
