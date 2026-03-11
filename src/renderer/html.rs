@@ -1138,19 +1138,19 @@ impl Writer {
 pub fn render_attributes<W: TextWrite>(
     w: &mut W,
     source: &str,
-    attributes: &Metadata,
+    attributes: &Attributes,
     valid: Option<&AsciiWordSet>,
 ) -> Result<()> {
     for (key, value) in attributes.iter() {
         if !key.starts_with("data-") && !key.starts_with("aria-") {
             if let Some(valid_set) = valid {
-                if !valid_set.contains(key.as_str()) {
+                if !valid_set.contains(key) {
                     continue;
                 }
             }
         }
         w.write_str(" ")?;
-        w.write_str(key.as_str())?;
+        w.write_str(key)?;
         w.write_str("=\"")?;
         let b = value.bytes(source);
         write_bytes(w, &escape_html(b))?;

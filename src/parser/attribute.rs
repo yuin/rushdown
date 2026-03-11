@@ -40,9 +40,9 @@ pub fn parse_attributes<'a>(reader: &mut impl text::Reader<'a>) -> Option<Attrib
         if let Some((name, value)) = parse_attribute(reader) {
             if name == "class" && attrs.contains_key("class") {
                 let s = String::from(attrs.get("class").unwrap().str(reader.source()));
-                attrs.set(name, s + " " + value.str(reader.source()));
+                attrs.insert(name, (s + " " + value.str(reader.source())).into());
             } else {
-                attrs.set(name, value);
+                attrs.insert(name, value);
             }
             reader.skip_spaces();
             if reader.peek_byte() == b',' {

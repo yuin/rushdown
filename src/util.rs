@@ -10,7 +10,10 @@ use alloc::borrow::Cow;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::fmt::{self, Debug};
+use core::ops::Index;
 use core::{
+    borrow::Borrow,
     cmp::{min, Ordering},
     ops::Deref,
 };
@@ -1365,12 +1368,257 @@ impl<T> Ord for Prioritized<T> {
 
 // }}} Prioritized
 
+// StringMap {{{
+
+/// A simple map from strings to values.
+///
+/// StringMap keeps the entries in insertion order.
+/// This is not optimized for performance, but it is simple and works well for small maps.
+/// e.g. for attributes of an HTML element, which usually has only a few attributes.
+#[derive(Default, Clone)]
+pub struct StringMap<V> {
+    entries: Vec<(String, V)>,
+}
+
+impl<V> StringMap<V> {
+    /// Creates a new empty [`StringMap`].
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    /// Creates a new [`StringMap`] with the specified capacity.
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(cap),
+        }
+    }
+
+    /// Returns the number of entries in the map.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns true if the map contains no entries.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Removes all entries from the map.
+    pub fn clear(&mut self) {
+        self.entries.clear()
+    }
+
+    fn position<Q>(&self, key: &Q) -> Option<usize>
+    where
+        String: Borrow<Q>,
+        Q: Eq + ?Sized,
+    {
+        self.entries.iter().position(|(k, _)| k.borrow() == key)
+    }
+
+    /// Inserts a key-value pair into the map.
+    ///
+    /// If the map did not have this key present, None is returned.
+    /// If the map did have this key present, the value is updated, and the old value is returned.
+    pub fn insert(&mut self, key: impl Into<String>, value: V) -> Option<V> {
+        let key = key.into();
+        if let Some(i) = self.entries.iter().position(|(k, _)| k == &key) {
+            let old = core::mem::replace(&mut self.entries[i].1, value);
+            return Some(old);
+        }
+        self.entries.push((key, value));
+        None
+    }
+
+    /// Returns a reference to the value corresponding to the key.
+    pub fn get<Q>(&self, key: &Q) -> Option<&V>
+    where
+        String: Borrow<Q>,
+        Q: Eq + ?Sized,
+    {
+        self.position(key).map(|i| &self.entries[i].1)
+    }
+
+    /// Returns a mutable reference to the value corresponding to the key.
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        String: Borrow<Q>,
+        Q: Eq + ?Sized,
+    {
+        self.position(key).map(|i| &mut self.entries[i].1)
+    }
+
+    /// Removes a key from the map, returning the value at the key if the key was previously in the
+    /// map.
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
+    where
+        String: Borrow<Q>,
+        Q: Eq + ?Sized,
+    {
+        let i = self.position(key)?;
+        Some(self.entries.remove(i).1) // 挿入順維持
+    }
+
+    /// Returns an iterator over the key-value pairs in the map, in insertion order.
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &V)> {
+        self.entries.iter().map(|(k, v)| (k, v))
+    }
+
+    /// Returns an iterator over the key-value pairs in the map, in insertion order, with mutable
+    /// references to the values.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&String, &mut V)> {
+        self.entries.iter_mut().map(|(k, v)| (&*k, v))
+    }
+
+    /// Returns an iterator over the keys in the map, in insertion order.
+    pub fn keys(&self) -> impl Iterator<Item = &String> {
+        self.entries.iter().map(|(k, _)| k)
+    }
+
+    /// Returns an iterator over the values in the map, in insertion order.
+    pub fn values(&self) -> impl Iterator<Item = &V> {
+        self.entries.iter().map(|(_, v)| v)
+    }
+
+    /// Returns an iterator over the values in the map, in insertion order, with mutable references
+    /// to the values.
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
+        self.entries.iter_mut().map(|(_, v)| v)
+    }
+
+    /// Returns true if the map contains a value for the specified key.
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        String: Borrow<Q>,
+        Q: Eq + ?Sized,
+    {
+        self.position(key).is_some()
+    }
+}
+
+impl<V> Index<&str> for StringMap<V> {
+    type Output = V;
+    fn index(&self, key: &str) -> &Self::Output {
+        self.get(key).expect("key not found")
+    }
+}
+
+impl<V: Debug> Debug for StringMap<V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut m = f.debug_map();
+        for (k, v) in &self.entries {
+            m.entry(k, v);
+        }
+        m.finish()
+    }
+}
+
+impl<V: PartialEq> PartialEq for StringMap<V> {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries
+    }
+}
+impl<V: Eq> Eq for StringMap<V> {}
+
+impl<V> Extend<(String, V)> for StringMap<V> {
+    fn extend<T: IntoIterator<Item = (String, V)>>(&mut self, iter: T) {
+        for (k, v) in iter {
+            self.insert(k, v);
+        }
+    }
+}
+
+impl<'a, V> Extend<(&'a str, V)> for StringMap<V> {
+    fn extend<T: IntoIterator<Item = (&'a str, V)>>(&mut self, iter: T) {
+        for (k, v) in iter {
+            self.insert(k, v);
+        }
+    }
+}
+
+impl<V> FromIterator<(String, V)> for StringMap<V> {
+    fn from_iter<T: IntoIterator<Item = (String, V)>>(iter: T) -> Self {
+        let iter = iter.into_iter();
+        let (lower, _) = iter.size_hint();
+        let mut m = Self::with_capacity(lower);
+        m.extend(iter);
+        m
+    }
+}
+
+impl<'a, V> FromIterator<(&'a str, V)> for StringMap<V> {
+    fn from_iter<T: IntoIterator<Item = (&'a str, V)>>(iter: T) -> Self {
+        let iter = iter.into_iter();
+        let (lower, _) = iter.size_hint();
+        let mut m = Self::with_capacity(lower);
+        for (k, v) in iter {
+            m.insert(k, v);
+        }
+        m
+    }
+}
+
+pub struct StringMapIntoIter<V>(<Vec<(String, V)> as IntoIterator>::IntoIter);
+
+impl<V> Iterator for StringMapIntoIter<V> {
+    type Item = (String, V);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+impl<V> ExactSizeIterator for StringMapIntoIter<V> {}
+
+impl<V> IntoIterator for StringMap<V> {
+    type Item = (String, V);
+    type IntoIter = StringMapIntoIter<V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        StringMapIntoIter(self.entries.into_iter())
+    }
+}
+
+impl<'a, V> IntoIterator for &'a StringMap<V> {
+    type Item = (&'a String, &'a V);
+    type IntoIter =
+        core::iter::Map<core::slice::Iter<'a, (String, V)>, fn(&(String, V)) -> (&String, &V)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        fn to_refs<V>((k, v): &(String, V)) -> (&String, &V) {
+            (k, v)
+        }
+        self.entries.iter().map(to_refs::<V>)
+    }
+}
+
+impl<'a, V> IntoIterator for &'a mut StringMap<V> {
+    type Item = (&'a String, &'a mut V);
+    type IntoIter = core::iter::Map<
+        core::slice::IterMut<'a, (String, V)>,
+        fn(&mut (String, V)) -> (&String, &mut V),
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        fn to_refs_mut<V>((k, v): &mut (String, V)) -> (&String, &mut V) {
+            (&*k, v)
+        }
+        self.entries.iter_mut().map(to_refs_mut::<V>)
+    }
+}
+
+// }}}
+
 // Tests {{{
 
 #[cfg(test)]
 mod tests {
 
     use super::*;
+    use alloc::string::ToString;
 
     #[allow(unused_imports)]
     #[cfg(all(not(feature = "std"), feature = "no-std-unix-debug"))]
@@ -1546,6 +1794,30 @@ mod tests {
         let resolved3 = resolve_entity_references(source3);
         assert_eq!(resolved3.as_ref(), b"Hello &unknown;!");
         assert!(matches!(resolved3, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_string_map() {
+        let mut map = StringMap::new();
+        map.insert("key1".to_string(), 1);
+        map.insert("key2".to_string(), 2);
+        assert_eq!(map.get("key1"), Some(&1));
+        assert_eq!(map.get("key2"), Some(&2));
+        assert_eq!(map.get("key3"), None);
+
+        map.insert("key1".to_string(), 10);
+        assert_eq!(map.get("key1"), Some(&10));
+
+        let keys: Vec<&String> = map.keys().collect();
+        assert_eq!(keys, vec!["key1", "key2"]);
+
+        let values: Vec<&i32> = map.values().collect();
+        assert_eq!(values, vec![&10, &2]);
+
+        let removed = map.remove("key1");
+        assert_eq!(removed, Some(10));
+        assert_eq!(map.get("key1"), None);
+        assert_eq!(map.get("key2"), Some(&2));
     }
 }
 

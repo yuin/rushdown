@@ -103,12 +103,13 @@ use alloc::vec::Vec;
 use core::any::Any;
 use core::error::Error as CoreError;
 use core::fmt::{self, Debug, Display, Formatter, Write};
-use core::iter::{FromIterator, IntoIterator};
+use core::iter::IntoIterator;
 use core::ops::{Index, IndexMut};
 use core::result::Result as CoreResult;
 
 use crate::error::*;
 use crate::text;
+use crate::util::StringMap;
 
 use bitflags::bitflags;
 
@@ -711,167 +712,65 @@ impl IndexMut<NodeRef> for Arena {
 
 // }}}
 
-// TextMap(Metadata & Attributes) {{{
+// Metadata & Attributes {{{
 
-/// A map of text values associated with string keys.
-#[derive(Default)]
-pub struct TextMap {
-    store: Vec<(String, text::Value)>,
+/// A value type for metadata.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Meta {
+    #[default]
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
+    Sequence(Vec<Meta>),
+    Mapping(StringMap<Meta>),
 }
 
-impl Debug for TextMap {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_map()
-            .entries(self.store.iter().map(|(k, v)| (k, v)))
-            .finish()
-    }
-}
-
-impl TextMap {
-    /// Creates a new, empty TextMap.
-    pub fn new() -> Self {
-        Self { store: Vec::new() }
-    }
-
-    /// Clears all entries in the TextMap.
-    pub fn clear(&mut self) {
-        self.store.clear();
-    }
-
-    /// Checks if the TextMap contains the specified key.
-    pub fn contains_key(&self, key: &str) -> bool {
-        self.store.iter().any(|(k, _)| k == key)
-    }
-
-    /// Gets a reference to the value associated with the specified key.
-    pub fn get(&self, key: &str) -> Option<&text::Value> {
-        self.store
-            .iter()
-            .find_map(|(k, v)| if k == key { Some(v) } else { None })
-    }
-
-    /// Gets a mutable reference to the value associated with the specified key.
-    pub fn set(&mut self, key: impl Into<String>, value: impl Into<text::Value>) {
-        let key = key.into();
-        let value = value.into();
-        if let Some((_, v)) = self.store.iter_mut().find(|(k, _)| k == &key) {
-            *v = value;
-        } else {
-            self.store.push((key, value));
+macro_rules! impl_meta_as {
+    ($name: ident, $variant:ident, $ty:ty) => {
+        /// Returns the value if this Meta is a $variant, otherwise returns None.
+        pub fn $name(&self) -> Option<&$ty> {
+            let Meta::$variant(v) = self else { return None };
+            Some(v)
         }
-    }
-
-    /// Returns true if the TextMap contains no entries.
-    pub fn is_empty(&self) -> bool {
-        self.store.is_empty()
-    }
-
-    /// Returns an iterator over the entries in the TextMap.
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &text::Value)> {
-        self.store.iter().map(|(k, v)| (k, v))
-    }
-
-    /// Returns a mutable iterator over the entries in the TextMap.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&String, &mut text::Value)> {
-        self.store.iter_mut().map(|(k, v)| (k as &String, v))
-    }
-
-    /// Returns an iterator over the keys in the TextMap.
-    pub fn keys(&self) -> impl Iterator<Item = &String> {
-        self.store.iter().map(|(k, _)| k)
-    }
-
-    /// Returns an iterator over the values in the TextMap.
-    pub fn values(&self) -> impl Iterator<Item = &text::Value> {
-        self.store.iter().map(|(_, v)| v)
-    }
+    };
 }
 
-pub struct TextMapIntoIter(<Vec<(String, text::Value)> as IntoIterator>::IntoIter);
-pub struct TextMapIter<'a>(<&'a Vec<(String, text::Value)> as IntoIterator>::IntoIter);
-pub struct TextMapIterMut<'a>(<&'a mut Vec<(String, text::Value)> as IntoIterator>::IntoIter);
-
-impl IntoIterator for TextMap {
-    type Item = (String, text::Value);
-    type IntoIter = TextMapIntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        TextMapIntoIter(self.store.into_iter())
+impl Meta {
+    /// Takes the value of this Meta, leaving Null in its place.
+    pub fn take(&mut self) -> Meta {
+        core::mem::replace(self, Meta::Null)
     }
-}
 
-impl<'a> IntoIterator for &'a TextMap {
-    type Item = (&'a String, &'a text::Value);
-    type IntoIter = TextMapIter<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        TextMapIter(self.store.iter())
+    /// Returns a mutable reference to the value if this Meta is a Mapping, otherwise returns None.
+    pub fn as_mapping_mut(&mut self) -> Option<&mut StringMap<Meta>> {
+        let Meta::Mapping(m) = self else { return None };
+        Some(m)
     }
-}
 
-impl<'a> IntoIterator for &'a mut TextMap {
-    type Item = (&'a String, &'a mut text::Value);
-    type IntoIter = TextMapIterMut<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        TextMapIterMut(self.store.iter_mut())
+    /// Returns a mutable reference to the value if this Meta is a Sequence, otherwise returns
+    /// None.
+    pub fn as_sequence_mut(&mut self) -> Option<&mut Vec<Meta>> {
+        let Meta::Sequence(s) = self else { return None };
+        Some(s)
     }
-}
 
-impl Iterator for TextMapIntoIter {
-    type Item = (String, text::Value);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
-    }
-}
-impl<'a> Iterator for TextMapIter<'a> {
-    type Item = (&'a String, &'a text::Value);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|(k, v)| (k, v))
-    }
-}
-
-impl<'a> Iterator for TextMapIterMut<'a> {
-    type Item = (&'a String, &'a mut text::Value);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|(k, v)| (k as &String, v))
-    }
-}
-
-impl FromIterator<(String, text::Value)> for TextMap {
-    fn from_iter<T: IntoIterator<Item = (String, text::Value)>>(iter: T) -> Self {
-        let mut store = Vec::new();
-        store.extend(iter);
-        Self { store }
-    }
-}
-
-impl Extend<(String, text::Value)> for TextMap {
-    fn extend<T: IntoIterator<Item = (String, text::Value)>>(&mut self, iter: T) {
-        self.store.extend(iter);
-    }
-}
-
-impl<'a> Extend<(&'a String, &'a text::Value)> for TextMap
-where
-    text::Value: Clone,
-{
-    fn extend<T: IntoIterator<Item = (&'a String, &'a text::Value)>>(&mut self, iter: T) {
-        self.store
-            .extend(iter.into_iter().map(|(k, v)| (k.clone(), v.clone())));
-    }
+    impl_meta_as!(as_bool, Bool, bool);
+    impl_meta_as!(as_int, Int, i64);
+    impl_meta_as!(as_float, Float, f64);
+    impl_meta_as!(as_str, String, str);
+    impl_meta_as!(as_sequence, Sequence, Vec<Meta>);
+    impl_meta_as!(as_mapping, Mapping, StringMap<Meta>);
 }
 
 /// Metadata associated with a document.
-pub type Metadata = TextMap;
+pub type Metadata = StringMap<Meta>;
 
 /// Attributes associated with a node.
-pub type Attributes = TextMap;
+pub type Attributes = StringMap<text::Value>;
 
-// }}} TextMap(Metadata & Attributes)
+// }}} Metadata & Attributes
 
 // Node & Data {{{
 
@@ -1215,7 +1114,7 @@ impl Node {
             next_sibling: None,
             previous_sibling: None,
             last_child: None,
-            attributes: Attributes::default(),
+            attributes: Attributes::new(),
         }
     }
 
@@ -1644,9 +1543,17 @@ pub fn walk<E: CoreError + 'static>(
 //   Document {{{
 
 /// Represents the root document node.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Document {
     meta: Metadata,
+}
+
+impl Default for Document {
+    fn default() -> Self {
+        Self {
+            meta: Metadata::new(),
+        }
+    }
 }
 
 impl Document {

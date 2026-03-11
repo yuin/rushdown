@@ -6,6 +6,7 @@ use crate::context::{ContextKey, ContextKeyRegistry, NodeRefValue};
 use crate::println;
 
 use alloc::rc::Rc;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use core::cell::RefCell;
@@ -291,7 +292,9 @@ fn generate_auto_heading_id(
         ctx.ids_mut()
             .generate(&content, arena[node_ref].kind_data())
     };
-    arena[node_ref].attributes_mut().set("id", heading_id);
+    arena[node_ref]
+        .attributes_mut()
+        .insert("id".to_string(), heading_id.into());
 }
 
 fn parse_heading_attributes(
