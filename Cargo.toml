@@ -1,6 +1,6 @@
 [package]
 name = "rushdown"
-version = "0.9.5"
+version = "0.9.6"
 authors = ["Yusuke Inuzuka <yuin@inforno.net>"]
 edition = "2021"
 rust-version = "1.87"

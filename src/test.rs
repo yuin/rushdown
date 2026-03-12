@@ -43,17 +43,17 @@ impl MarkdownTestCase {
     /// Creates a new Markdown test case.
     pub fn new(
         no: u64,
-        description: String,
-        markdown: String,
-        expected: String,
-        options: MarkdownTestCaseOptions,
+        description: impl Into<String>,
+        markdown: impl Into<String>,
+        expected: impl Into<String>,
+        options: impl Into<MarkdownTestCaseOptions>,
     ) -> Self {
         Self {
             no,
-            description,
-            markdown,
-            expected,
-            options,
+            description: description.into(),
+            markdown: markdown.into(),
+            expected: expected.into(),
+            options: options.into(),
         }
     }
 
