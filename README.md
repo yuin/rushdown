@@ -416,6 +416,7 @@ HtmlRenderer constructor function can take these arguments if needed, in any ord
 - [rushdown-meta](https://crates.io/crates/rushdown-meta): A meta(YAML frontmatter) extension for rushdown.
 - [rushdown-emoji](https://crates.io/crates/rushdown-emoji): An emoji extension for rushdown.
 - [rushdown-highlighting](https://crates.io/crates/rushdown-highlighting): A syntax highlight extension for rushdown.
+- [rushdown-diagram](https://crates.io/crates/rushdown-diagram): A diagram visualization(e.g. MermaidJS) extension for rushdown.
 
 ## Donation
 BTC: 1NEDSyUmo4SMTDP83JJQSWi1MvQUGGNMZB
