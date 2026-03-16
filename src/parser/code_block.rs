@@ -46,7 +46,7 @@ impl BlockParser for IndentedCodeBlockParser {
             segment = preserve_leading_tab_in_code_block(&segment, reader, 0);
         }
         segment = segment.with_force_newline(true);
-        as_type_data_mut!(arena, code_block_ref, Block).append_line(segment);
+        as_type_data_mut!(arena, code_block_ref, Block).append_source_line(segment);
         reader.advance_to_eol();
         Some((code_block_ref, State::NO_CHILDREN))
     }
@@ -61,7 +61,7 @@ impl BlockParser for IndentedCodeBlockParser {
         let (line, mut segment) = reader.peek_line_bytes()?;
         if is_blank(&line) {
             let block = as_type_data_mut!(arena, node_ref, Block);
-            block.append_line(segment.trim_left_space_width(4, reader.source()));
+            block.append_source_line(segment.trim_left_space_width(4, reader.source()));
             return Some(State::NO_CHILDREN);
         }
         let (pos, padding) = indent_position(line.as_ref(), reader.line_offset(), 4)?;
@@ -73,7 +73,7 @@ impl BlockParser for IndentedCodeBlockParser {
             segment = preserve_leading_tab_in_code_block(&segment, reader, 0);
         }
         segment = segment.with_force_newline(true);
-        as_type_data_mut!(arena, node_ref, Block).append_line(segment);
+        as_type_data_mut!(arena, node_ref, Block).append_source_line(segment);
         reader.advance_to_eol();
         Some(State::NO_CHILDREN)
     }
@@ -88,7 +88,7 @@ impl BlockParser for IndentedCodeBlockParser {
         let block = as_type_data_mut!(arena, node_ref, Block);
 
         // trim trailing blank lines
-        let mut lines = block.take_lines();
+        let mut lines = block.take_source();
         let mut length = lines.len() - 1;
         let source = reader.source();
         while length != 0 {
@@ -99,7 +99,7 @@ impl BlockParser for IndentedCodeBlockParser {
             }
         }
         lines.truncate(length + 1);
-        block.put_back_lines(lines);
+        block.put_back_source(lines);
     }
 
     fn can_accept_indented_line(&self) -> bool {
@@ -203,7 +203,7 @@ impl BlockParser for FencedCodeBlockParser {
         if padding != 0 {
             seg = preserve_leading_tab_in_code_block(&seg, reader, 0);
         }
-        as_type_data_mut!(arena, node_ref, Block).append_line(seg);
+        as_type_data_mut!(arena, node_ref, Block).append_source_line(seg);
         reader.advance_to_eol();
         Some(State::NO_CHILDREN)
     }

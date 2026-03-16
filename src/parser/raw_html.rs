@@ -39,7 +39,7 @@ impl InlineParser for RawHtmlParser {
         {
             let node_ref = arena.new_node(RawHtml::new());
             for seg in reader.between_current(line, pos) {
-                as_kind_data_mut!(arena, node_ref, RawHtml).add_line(seg);
+                as_kind_data_mut!(arena, node_ref, RawHtml).add_value(seg.into());
             }
             return Some(node_ref);
         }

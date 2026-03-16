@@ -35,13 +35,13 @@ You can run this benchmark by `make bench`
 rushdown builds a clean, extensible AST structure, achieves full compliance with CommonMark, all while being one of the fastest CommonMark parser implementation written in Rust.
 
 ```text
-rushdown-cached         time:   [3.4741 ms 3.5533 ms 3.6504 ms]
-rushdown                time:   [3.5167 ms 3.5838 ms 3.6607 ms]
-markdown-rs             time:   [78.194 ms 79.865 ms 81.642 ms]
-comrak                  time:   [3.9462 ms 4.0100 ms 4.0804 ms]
-pulldown-cmark          time:   [5.4810 ms 5.5887 ms 5.7074 ms]
-cmark                   time: 3.4892 ms
-goldmark                time: 5.4065 ms
+rushdown-cached         time: 3.1845 ms
+rushdown                time: 3.3427 ms
+markdown-rs             time: 89.692 ms
+comrak                  time: 4.2451 ms
+pulldown-cmark          time: 6.0037 ms
+cmark                   time: 3.6439 ms
+goldmark                time: 5.6161 ms
 ```
 
 ## Security
@@ -289,7 +289,7 @@ let source = "Hello, World!";
 let doc_ref = arena.new_node(Document::new());
 let paragraph_ref = arena.new_node(Paragraph::new());
 let seg = Segment::new(0, source.len());
-as_type_data_mut!(&mut arena[paragraph_ref], Block).append_line(seg);
+as_type_data_mut!(&mut arena[paragraph_ref], Block).append_source_line(seg);
 let text_ref = arena.new_node(Text::new(seg));
 paragraph_ref.append_child(&mut arena, text_ref);
 doc_ref.append_child(&mut arena, paragraph_ref);
@@ -301,7 +301,7 @@ assert_eq!(
 );
 assert_eq!(
     as_type_data!(&arena[paragraph_ref], Block)
-        .lines()
+        .source()
         .first()
         .unwrap()
         .str(source),

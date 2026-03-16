@@ -15,6 +15,11 @@ test-std: scanner ## Run tests for std
 fuzz: scanner ## Run fuzz tests
 	cargo fuzz run markdown
 
+.PHONY: lint
+lint: ## Run linters
+	cargo clippy --no-default-features --features no-std-unix-debug,html-entities
+	cargo clippy
+
 scanner: src/scanner/scanner_gen.rs ## Generate the scanner source code
 
 src/scanner/scanner_gen.rs: src/scanner/scanner_record.re src/scanner/scanner_generic.re

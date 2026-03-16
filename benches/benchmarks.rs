@@ -2,7 +2,6 @@ use std::{fs, path::PathBuf};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use rushdown::{new_markdown_to_html, parser, renderer::html};
-
 fn data_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("benches")

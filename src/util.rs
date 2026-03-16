@@ -118,6 +118,7 @@ impl<'a> CowByteBuffer<'a> {
     }
 
     /// Returns the next byte and advances the position.
+    #[inline(always)]
     pub fn next_byte(&mut self) -> Option<&u8> {
         self.i += self.inc as usize;
         if self.i >= self.len {
@@ -571,20 +572,44 @@ pub fn char_at(line: &[u8], i: usize) -> Option<char> {
     None
 }
 
+unsafe fn to_char_unchecked(bytes: &[u8]) -> char {
+    let b0 = *bytes.get_unchecked(0);
+    let mut cp: u32 = if b0 < 0xE0 {
+        // 110xxxxx
+        (b0 & 0x1F) as u32
+    } else if b0 < 0xF0 {
+        // 1110xxxx
+        (b0 & 0x0F) as u32
+    } else {
+        // 11110xxx
+        (b0 & 0x07) as u32
+    };
+
+    let mut i = 1;
+    while i < bytes.len() {
+        let bx = *bytes.get_unchecked(i);
+        cp = (cp << 6) | ((bx & 0x3F) as u32);
+        i += 1;
+    }
+    core::char::from_u32_unchecked(cp)
+}
+
 /// Folds the case of the given byte slice using full Unicode case folding.
 pub fn fold_case_full<'a>(c: impl Into<Cow<'a, [u8]>>) -> Cow<'a, [u8]> {
     let cw = c.into();
     let mut cow = CowByteBuffer::new(cw);
     let len = cow.len();
     while let Some(&b) = cow.next_byte() {
+        if b < 0xb5 {
+            if (0x41..=0x5a).contains(&b) {
+                // A-Z to a-z
+                cow.write_byte(b + 32, 0);
+            }
+            continue;
+        }
         if let Some(utf8_len) = utf8_len(b) {
             if cow.pos() + utf8_len <= len {
-                let Ok(st) = str::from_utf8(&cow[cow.pos()..cow.pos() + utf8_len]) else {
-                    continue;
-                };
-                let Ok(ch) = st.chars().next().ok_or(()) else {
-                    continue;
-                };
+                let ch = unsafe { to_char_unchecked(&cow[cow.pos()..cow.pos() + utf8_len]) };
                 if let Some(folded) = UNICODE_CASE_FOLDINGS.get(&ch) {
                     cow.write_bytes(folded.as_bytes(), utf8_len - 1);
                 }

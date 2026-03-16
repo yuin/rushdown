@@ -58,7 +58,7 @@ impl BlockParser for HtmlBlockParser {
             return None;
         };
         reader.advance_to_eol();
-        as_type_data_mut!(arena, node_ref, Block).append_line(segment);
+        as_type_data_mut!(arena, node_ref, Block).append_source_line(segment);
         Some((node_ref, State::NO_CHILDREN))
     }
 
@@ -87,19 +87,19 @@ impl BlockParser for HtmlBlockParser {
             };
             // Check if the opening line contains the closing pattern
             {
-                let lines = as_type_data!(arena, node_ref, Block).lines();
+                let lines = as_type_data!(arena, node_ref, Block).source();
                 if lines.len() == 1 && f(&lines.last().unwrap().bytes(reader.source())).is_some() {
                     return None;
                 }
             }
             if f(&line).is_some() {
                 reader.advance_to_eol();
-                as_type_data_mut!(arena, node_ref, Block).append_line(segment);
+                as_type_data_mut!(arena, node_ref, Block).append_source_line(segment);
                 return None;
             }
         }
 
-        as_type_data_mut!(arena, node_ref, Block).append_line(segment);
+        as_type_data_mut!(arena, node_ref, Block).append_source_line(segment);
         Some(State::NO_CHILDREN)
     }
 

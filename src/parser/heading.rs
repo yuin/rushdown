@@ -77,15 +77,15 @@ impl BlockParser for AtxHeadingParser {
             return Some((heading_ref, State::NO_CHILDREN));
         }
         if self.options.attributes && memchr::memchr(b'{', &line).is_some() {
-            as_type_data_mut!(arena, heading_ref, Block).append_line(hl);
+            as_type_data_mut!(arena, heading_ref, Block).append_source_line(hl);
             if let Some(attrs) = parse_heading_attributes(arena, heading_ref, reader, ctx) {
                 arena[heading_ref].attributes_mut().extend(attrs);
                 hl = *as_type_data_mut!(arena, heading_ref, Block)
-                    .lines()
+                    .source()
                     .first()
                     .unwrap();
             }
-            as_type_data_mut!(arena, heading_ref, Block).remove_line(0);
+            as_type_data_mut!(arena, heading_ref, Block).remove_source_line(0);
         }
 
         // handle closing sequence of '#' characters
@@ -107,7 +107,7 @@ impl BlockParser for AtxHeadingParser {
             }
         }
         hl = hl.with_stop(hl.start() + stop);
-        as_type_data_mut!(arena, heading_ref, Block).append_line(hl);
+        as_type_data_mut!(arena, heading_ref, Block).append_source_line(hl);
         reader.advance_to_eol();
 
         Some((heading_ref, State::NO_CHILDREN))
@@ -181,7 +181,7 @@ impl BlockParser for SetextHeadingParser {
         let c = matches_setext_heading_bar(&line)?;
         let level = if c == b'=' { 1 } else { 2 };
         let node_ref = arena.new_node(Heading::new(level));
-        as_type_data_mut!(arena, node_ref, Block).append_line(segment);
+        as_type_data_mut!(arena, node_ref, Block).append_source_line(segment);
         ctx.insert(self.temporary_paragraph, last_ref);
         Some((node_ref, State::REQUIRE_PARAGRAPH | State::NO_CHILDREN))
     }
@@ -208,10 +208,10 @@ impl BlockParser for SetextHeadingParser {
         };
         {
             let hblk = as_type_data_mut!(arena, node_ref, Block);
-            hblk.remove_line(0);
+            hblk.remove_source_line(0);
         }
         if !as_type_data!(arena, paragraph_ref, Block)
-            .lines()
+            .source()
             .is_empty()
         {
             let has_blank_previous_line: bool;
@@ -219,11 +219,11 @@ impl BlockParser for SetextHeadingParser {
             {
                 let blk = as_type_data_mut!(arena, paragraph_ref, Block);
                 has_blank_previous_line = blk.has_blank_previous_line();
-                lines = blk.take_lines();
+                lines = blk.take_source();
             }
 
             let hblk = as_type_data_mut!(arena, node_ref, Block);
-            hblk.append_lines(&lines);
+            hblk.append_source_lines(&lines);
             hblk.set_blank_previous_line(has_blank_previous_line);
             if arena[paragraph_ref].parent().is_some() {
                 paragraph_ref.delete(arena);
@@ -277,7 +277,7 @@ fn generate_auto_heading_id(
     reader: &mut text::BasicReader,
     ctx: &mut Context,
 ) {
-    let lines = as_type_data!(arena, node_ref, Block).lines();
+    let lines = as_type_data!(arena, node_ref, Block).source();
     let heading_id = if lines.len() == 1 {
         ctx.ids_mut().generate(
             &lines.first().unwrap().str(reader.source()),
@@ -307,7 +307,7 @@ fn parse_heading_attributes(
     let mut consumed = 0usize;
 
     let seg = *{
-        let lines = as_type_data!(arena, node_ref, Block).lines();
+        let lines = as_type_data!(arena, node_ref, Block).source();
         if lines.is_empty() {
             return None;
         }
@@ -352,8 +352,8 @@ fn parse_heading_attributes(
             .with_stop(seg.stop() - consumed)
             .trim_right_space(reader.source());
         let blk = as_type_data_mut!(arena, node_ref, Block);
-        blk.remove_line(blk.lines().len() - 1);
-        blk.append_line(last_line);
+        blk.remove_source_line(blk.source().len() - 1);
+        blk.append_source_line(last_line);
     }
     attrs
 }

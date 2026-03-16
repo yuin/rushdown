@@ -127,7 +127,7 @@ impl TableParagraphTransformer {
             let mut col_seg: Segment =
                 (segment.start() + start, segment.start() + pos - end).into();
             col_seg = col_seg.trim_left_space(source).trim_right_space(source);
-            as_type_data_mut!(arena, cell_ref, Block).append_line(col_seg);
+            as_type_data_mut!(arena, cell_ref, Block).append_source_line(col_seg);
             row_ref.append_child_fast(arena, cell_ref);
             i += 1;
         }
@@ -150,9 +150,9 @@ impl ParagraphTransformer for TableParagraphTransformer {
     ) {
         let mut i = 1;
         let mut start = i;
-        let mut lines = as_type_data_mut!(arena, paragraph_ref, Block).take_lines();
+        let mut lines = as_type_data_mut!(arena, paragraph_ref, Block).take_source();
         if lines.len() < 2 {
-            as_type_data_mut!(arena, paragraph_ref, Block).put_back_lines(lines);
+            as_type_data_mut!(arena, paragraph_ref, Block).put_back_source(lines);
             return;
         }
         let mut alignments_opt: Option<Vec<TableCellAlignment>> = None;
@@ -211,11 +211,11 @@ impl ParagraphTransformer for TableParagraphTransformer {
                 if lines.is_empty() {
                     paragraph_ref.remove(arena);
                 } else {
-                    as_type_data_mut!(arena, paragraph_ref, Block).put_back_lines(lines);
+                    as_type_data_mut!(arena, paragraph_ref, Block).put_back_source(lines);
                 }
             }
             _ => {
-                as_type_data_mut!(arena, paragraph_ref, Block).put_back_lines(lines);
+                as_type_data_mut!(arena, paragraph_ref, Block).put_back_source(lines);
             }
         }
     }
@@ -325,23 +325,23 @@ impl AstTransformer for TableAstTransformer {
                 let next = arena[c].next_sibling();
                 let parent = arena[c].parent().unwrap();
                 if let KindData::Text(t) = arena[c].kind_data() {
-                    if let Some(mut segment) = t.segment().copied() {
+                    if let Some(mut index) = t.index().copied() {
                         'l: loop {
                             for &pos in lst[i].pos.iter() {
-                                if segment.start() <= pos && pos < segment.stop() {
+                                if index.start() <= pos && pos < index.stop() {
                                     let t1_ref = arena.new_node(Text::with_qualifiers(
-                                        segment.with_stop(pos),
+                                        (index.start(), pos),
                                         TextQualifier::RAW,
                                     ));
                                     let t2_ref = arena.new_node(Text::with_qualifiers(
-                                        segment.with_start(pos + 1),
+                                        (pos + 1, index.stop()),
                                         TextQualifier::RAW,
                                     ));
                                     parent.insert_after(arena, c, t1_ref);
                                     parent.insert_after(arena, t1_ref, t2_ref);
                                     c.delete(arena);
                                     c = t2_ref;
-                                    segment = segment.with_start(pos + 1);
+                                    index = (pos + 1, index.stop()).into();
                                     continue 'l;
                                 }
                             }

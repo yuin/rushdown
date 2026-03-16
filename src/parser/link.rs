@@ -98,7 +98,7 @@ impl InlineParser for LinkParser {
             let ssegment = Segment::new(
                 ctx.link_labels()
                     .elem(last_link_label_ref)
-                    .segment(arena)
+                    .index(arena)
                     .stop(),
                 segment.start(),
             );
@@ -190,7 +190,7 @@ fn parse_reference_link(
     if is_blank(&maybe_link_ref) {
         // collapsed reference link
         maybe_link_ref = Segment::new(
-            ctx.link_labels().get_elem(last_ref)?.segment(arena).stop(),
+            ctx.link_labels().get_elem(last_ref)?.index(arena).stop(),
             start_pos.start() - 1,
         )
         .bytes(reader.source());
@@ -406,7 +406,7 @@ fn link_label_length(arena: &Arena, ctx: &Context) -> usize {
     if let (Some(first), Some(last)) = (first, last) {
         let first = ctx.link_labels().get_elem(first).expect("should exist");
         let last = ctx.link_labels().get_elem(last).expect("should exist");
-        last.segment(arena).stop() - first.segment(arena).start()
+        last.index(arena).stop() - first.index(arena).start()
     } else {
         0
     }

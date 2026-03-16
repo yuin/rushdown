@@ -177,10 +177,8 @@ impl InlineParser for LinkifyParser {
                 arena.new_node(Text::new(unsafe { core::str::from_utf8_unchecked(label) }));
             auto_link_ref.append_child_fast(arena, text_ref);
             if start != 0 {
-                parent_ref.merge_or_append_text_segment(
-                    arena,
-                    (segment.start(), segment.start() + start).into(),
-                );
+                parent_ref
+                    .merge_or_append_text(arena, (segment.start(), segment.start() + start).into());
             }
             reader.advance(start + (stop - start));
             return Some(auto_link_ref);
@@ -204,10 +202,8 @@ impl InlineParser for LinkifyParser {
         }
         stop -= trim_right_length(&line[..stop], b"?!.,:*_~");
         if start != 0 {
-            parent_ref.merge_or_append_text_segment(
-                arena,
-                (segment.start(), segment.start() + start).into(),
-            );
+            parent_ref
+                .merge_or_append_text(arena, (segment.start(), segment.start() + start).into());
         }
         let label = unsafe { core::str::from_utf8_unchecked(&line[start..stop]) };
         let seg: Segment = (segment.start() + start, segment.start() + stop).into();

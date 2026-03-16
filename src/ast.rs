@@ -29,7 +29,7 @@
 //! let doc_ref = arena.new_node(Document::new());
 //! let paragraph_ref = arena.new_node(Paragraph::new());
 //! let seg = Segment::new(0, source.len());
-//! as_type_data_mut!(&mut arena[paragraph_ref], Block).append_line(seg);
+//! as_type_data_mut!(&mut arena[paragraph_ref], Block).append_source_line(seg);
 //! let text_ref = arena.new_node(Text::new(seg));
 //! paragraph_ref.append_child(&mut arena, text_ref);
 //! doc_ref.append_child(&mut arena, paragraph_ref);
@@ -41,7 +41,7 @@
 //! );
 //! assert_eq!(
 //!     as_type_data!(&arena[paragraph_ref], Block)
-//!         .lines()
+//!         .source()
 //!         .first()
 //!         .unwrap()
 //!         .str(source),
@@ -187,18 +187,18 @@ impl NodeRef {
         if arena[child_ref].parent().is_some() {
             child_ref.try_remove(arena)?;
         }
-        let lastref_opt = arena.get_result(self)?.last_child;
+        let lastref_opt = arena.try_get(self)?.last_child;
         arena[self].last_child = Some(child_ref);
         if lastref_opt.is_none() {
             arena[self].first_child = Some(child_ref);
         }
         {
-            let child = arena.get_mut_result(child_ref)?;
+            let child = arena.try_get_mut(child_ref)?;
             child.parent = Some(self);
             child.previous_sibling = lastref_opt;
         }
         if let Some(lastref) = lastref_opt {
-            arena.get_mut_result(lastref)?.next_sibling = Some(child_ref);
+            arena.try_get_mut(lastref)?.next_sibling = Some(child_ref);
         } else {
             arena[self].first_child = Some(child_ref);
         }
@@ -224,7 +224,7 @@ impl NodeRef {
         target_ref: NodeRef,
         replacer_ref: NodeRef,
     ) -> Result<()> {
-        if arena.get_result(target_ref)?.parent != Some(self) {
+        if arena.try_get(target_ref)?.parent != Some(self) {
             return Err(Error::invalid_node_operation(format!(
                 "Target node {:?} is not a child of node {:?}",
                 target_ref, self
@@ -234,22 +234,22 @@ impl NodeRef {
         let next_ref_opt = arena[target_ref].next_sibling;
 
         {
-            let replacer = arena.get_mut_result(replacer_ref)?;
+            let replacer = arena.try_get_mut(replacer_ref)?;
             replacer.parent = Some(self);
             replacer.previous_sibling = previous_ref_opt;
             replacer.next_sibling = next_ref_opt;
         }
 
         if let Some(prev_ref) = previous_ref_opt {
-            arena.get_mut_result(prev_ref)?.next_sibling = Some(replacer_ref);
+            arena.try_get_mut(prev_ref)?.next_sibling = Some(replacer_ref);
         } else {
-            arena.get_mut_result(self)?.first_child = Some(replacer_ref);
+            arena.try_get_mut(self)?.first_child = Some(replacer_ref);
         }
 
         if let Some(next_ref) = next_ref_opt {
-            arena.get_mut_result(next_ref)?.previous_sibling = Some(replacer_ref);
+            arena.try_get_mut(next_ref)?.previous_sibling = Some(replacer_ref);
         } else {
-            arena.get_mut_result(self)?.last_child = Some(replacer_ref);
+            arena.try_get_mut(self)?.last_child = Some(replacer_ref);
         }
 
         // Clear the target node in the arena
@@ -278,7 +278,7 @@ impl NodeRef {
         if arena[insertee_ref].parent().is_some() {
             insertee_ref.try_remove(arena)?;
         }
-        if arena.get_result(target_ref)?.parent != Some(self) {
+        if arena.try_get(target_ref)?.parent != Some(self) {
             return Err(Error::invalid_node_operation(format!(
                 "Target node {:?} is not a child of node {:?}",
                 target_ref, self
@@ -286,22 +286,22 @@ impl NodeRef {
         }
         let prev = arena[target_ref].previous_sibling;
         {
-            let insertee = arena.get_mut_result(insertee_ref)?;
+            let insertee = arena.try_get_mut(insertee_ref)?;
             insertee.parent = Some(self);
             insertee.next_sibling = Some(target_ref);
             insertee.previous_sibling = prev;
         }
 
         if let Some(prev_ref) = arena[target_ref].previous_sibling {
-            arena.get_mut_result(prev_ref)?.next_sibling = Some(insertee_ref);
+            arena.try_get_mut(prev_ref)?.next_sibling = Some(insertee_ref);
         } else {
-            arena.get_mut_result(self)?.first_child = Some(insertee_ref);
+            arena.try_get_mut(self)?.first_child = Some(insertee_ref);
         }
 
         arena[target_ref].previous_sibling = Some(insertee_ref);
-        if let Some(fc_ref) = arena.get_result(self)?.first_child {
+        if let Some(fc_ref) = arena.try_get(self)?.first_child {
             if fc_ref == target_ref {
-                arena.get_mut_result(self)?.first_child = Some(insertee_ref);
+                arena.try_get_mut(self)?.first_child = Some(insertee_ref);
             }
         }
         Ok(())
@@ -327,7 +327,7 @@ impl NodeRef {
         if arena[insertee_ref].parent().is_some() {
             insertee_ref.try_remove(arena)?;
         }
-        if arena.get_result(target_ref)?.parent != Some(self) {
+        if arena.try_get(target_ref)?.parent != Some(self) {
             return Err(Error::invalid_node_operation(format!(
                 "Target node {:?} is not a child of node {:?}",
                 target_ref, self
@@ -335,22 +335,22 @@ impl NodeRef {
         }
         let next = arena[target_ref].next_sibling;
         {
-            let insertee = arena.get_mut_result(insertee_ref)?;
+            let insertee = arena.try_get_mut(insertee_ref)?;
             insertee.parent = Some(self);
             insertee.previous_sibling = Some(target_ref);
             insertee.next_sibling = next;
         }
 
         if let Some(next_ref) = arena[target_ref].next_sibling {
-            arena.get_mut_result(next_ref)?.previous_sibling = Some(insertee_ref);
+            arena.try_get_mut(next_ref)?.previous_sibling = Some(insertee_ref);
         } else {
-            arena.get_mut_result(self)?.last_child = Some(insertee_ref);
+            arena.try_get_mut(self)?.last_child = Some(insertee_ref);
         }
 
         arena[target_ref].next_sibling = Some(insertee_ref);
-        if let Some(lc_ref) = arena.get_result(self)?.last_child {
+        if let Some(lc_ref) = arena.try_get(self)?.last_child {
             if lc_ref == target_ref {
-                arena.get_mut_result(self)?.last_child = Some(insertee_ref);
+                arena.try_get_mut(self)?.last_child = Some(insertee_ref);
             }
         }
         Ok(())
@@ -375,13 +375,13 @@ impl NodeRef {
         let previous_ref_opt;
         let next_ref_opt;
         {
-            let node = arena.get_result(self)?;
+            let node = arena.try_get(self)?;
             parent_ref_opt = node.parent;
             previous_ref_opt = node.previous_sibling;
             next_ref_opt = node.next_sibling;
         }
         if let Some(parent_ref) = parent_ref_opt {
-            let mparent = arena.get_mut_result(parent_ref)?;
+            let mparent = arena.try_get_mut(parent_ref)?;
             if mparent.first_child == Some(self) {
                 mparent.first_child = next_ref_opt;
             }
@@ -390,14 +390,14 @@ impl NodeRef {
             }
         }
         if let Some(previous_ref) = previous_ref_opt {
-            let mprevious = arena.get_mut_result(previous_ref)?;
+            let mprevious = arena.try_get_mut(previous_ref)?;
             mprevious.next_sibling = next_ref_opt;
         }
         if let Some(next_ref) = next_ref_opt {
-            let mnext = arena.get_mut_result(next_ref)?;
+            let mnext = arena.try_get_mut(next_ref)?;
             mnext.previous_sibling = previous_ref_opt;
         }
-        let node = arena.get_mut_result(self)?;
+        let node = arena.try_get_mut(self)?;
         node.parent = None;
         node.previous_sibling = None;
         node.next_sibling = None;
@@ -423,14 +423,14 @@ impl NodeRef {
         let next_ref_opt;
         let first_ref_opt;
         {
-            let node = arena.get_result(self)?;
+            let node = arena.try_get(self)?;
             parent_ref_opt = node.parent;
             previous_ref_opt = node.previous_sibling;
             next_ref_opt = node.next_sibling;
             first_ref_opt = node.first_child;
         }
         if let Some(parent_ref) = parent_ref_opt {
-            let mparent = arena.get_mut_result(parent_ref)?;
+            let mparent = arena.try_get_mut(parent_ref)?;
             if mparent.first_child == Some(self) {
                 mparent.first_child = next_ref_opt;
             }
@@ -439,17 +439,17 @@ impl NodeRef {
             }
         }
         if let Some(previous_ref) = previous_ref_opt {
-            let mprevious = arena.get_mut_result(previous_ref)?;
+            let mprevious = arena.try_get_mut(previous_ref)?;
             mprevious.next_sibling = next_ref_opt;
         }
         if let Some(next_ref) = next_ref_opt {
-            let mnext = arena.get_mut_result(next_ref)?;
+            let mnext = arena.try_get_mut(next_ref)?;
             mnext.previous_sibling = previous_ref_opt;
         }
         if first_ref_opt.is_some() {
             let mut currentref_opt = first_ref_opt;
             while let Some(current_ref) = currentref_opt {
-                let current = arena.get_mut_result(current_ref)?;
+                let current = arena.try_get_mut(current_ref)?;
                 let nextref_opt = current.next_sibling;
                 current_ref.try_delete(arena)?;
                 currentref_opt = nextref_opt;
@@ -461,118 +461,112 @@ impl NodeRef {
         Ok(())
     }
 
-    // Merges a given segment into the last child of this node if
+    // Merges a given index into the last child of this node if
     // it can be merged, otherwise creates a new Text node and appends it to after current
     // last child.
     //
     // # Panics
     // Panics if the operation fails(e.g. due to invalid NodeRef).
     #[inline(always)]
-    pub fn merge_or_append_text_segment(self, arena: &mut Arena, segment: text::Segment) {
-        self.try_merge_or_append_text_segment(arena, segment)
-            .unwrap();
+    pub fn merge_or_append_text(self, arena: &mut Arena, index: text::Index) {
+        self.try_merge_or_append_text(arena, index).unwrap();
     }
 
-    // Merges a given segment into the last child of this node if
+    // Merges a given index into the last child of this node if
     // it can be merged, otherwise creates a new Text node and appends it to after current
     // last child.
-    pub fn try_merge_or_append_text_segment(
-        self,
-        arena: &mut Arena,
-        segment: text::Segment,
-    ) -> Result<()> {
-        if let Some(last_child_ref) = arena.get_result(self)?.last_child {
-            if let KindData::Text(text_node) = arena.get_mut_result(last_child_ref)?.kind_data_mut()
-            {
-                if let Some(s) = text_node.segment() {
-                    if s.stop() == segment.start()
+    pub fn try_merge_or_append_text(self, arena: &mut Arena, index: text::Index) -> Result<()> {
+        if let Some(last_child_ref) = arena.try_get(self)?.last_child {
+            if let KindData::Text(text_node) = arena.try_get_mut(last_child_ref)?.kind_data_mut() {
+                if let Some(s) = text_node.index() {
+                    if s.stop() == index.start()
                         && !text_node.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
                         && !text_node.has_qualifiers(TextQualifier::TEMP)
                     {
-                        text_node.textual = s.with_stop(segment.stop()).into();
+                        text_node.value = (s.start(), index.stop()).into();
                         return Ok(());
                     }
                 }
             }
         }
-        let new_node_ref = arena.new_node(Text::new(segment));
+        let new_node_ref = arena.new_node(Text::new(index));
         self.try_append_child(arena, new_node_ref)?;
         Ok(())
     }
 
-    /// Merges a given segment into the text node after the target node if
+    /// Merges a given index into the text node after the target node if
     /// it can be merged, otherwise creates a new Text node and inserts it after the target node.
     ///
     // # Panics
     /// Panics if the operation fails(e.g. due to invalid NodeRef).
     #[inline(always)]
-    pub fn merge_or_insert_after_text_segment(
+    pub fn merge_or_insert_after_text(
         self,
         arena: &mut Arena,
         target_ref: NodeRef,
-        segment: text::Segment,
+        index: text::Index,
     ) {
-        self.try_merge_or_insert_after_text_segment(arena, target_ref, segment)
+        self.try_merge_or_insert_after_text(arena, target_ref, index)
             .unwrap();
     }
 
-    /// Merges a given segment into the text node after the target node if
+    /// Merges a given index into the text node after the target node if
     /// it can be merged, otherwise creates a new Text node and inserts it after the target node.
-    pub fn try_merge_or_insert_after_text_segment(
+    pub fn try_merge_or_insert_after_text(
         self,
         arena: &mut Arena,
         target_ref: NodeRef,
-        segment: text::Segment,
+        index: text::Index,
     ) -> Result<()> {
-        if let KindData::Text(text_node) = arena.get_mut_result(target_ref)?.kind_data_mut() {
-            if let Some(s) = text_node.segment() {
-                if s.stop() == segment.start()
+        if let KindData::Text(text_node) = arena.try_get_mut(target_ref)?.kind_data_mut() {
+            if let Some(s) = text_node.index() {
+                if s.stop() == index.start()
                     && !text_node.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
                     && !text_node.has_qualifiers(TextQualifier::TEMP)
                 {
-                    text_node.textual = Textual::Segment(s.with_stop(segment.stop()));
+                    text_node.value = (s.start(), index.stop()).into();
                     return Ok(());
                 }
             }
         }
-        let new_node_ref = arena.new_node(Text::new(segment));
+        let new_node_ref = arena.new_node(Text::new(index));
         self.try_insert_after(arena, target_ref, new_node_ref)?;
         Ok(())
     }
 
-    /// Merges a given segment into the text node before the target node if
+    /// Merges a given index into the text node before the target node if
     /// it can be merged, otherwise creates a new Text node and inserts it before the target node.
     ///
     /// # Panics
     /// Panics if the operation fails(e.g. due to invalid NodeRef).
     #[inline(always)]
-    pub fn merge_or_insert_before_text_segment(
+    pub fn merge_or_insert_before_text(
         self,
         arena: &mut Arena,
         target_ref: NodeRef,
-        segment: text::Segment,
+        index: text::Index,
     ) {
-        self.try_merge_or_insert_before_text_segment(arena, target_ref, segment)
+        self.try_merge_or_insert_before_text(arena, target_ref, index)
             .unwrap();
     }
 
-    /// Merges a given segment into the text node before the target node if
+    /// Merges a given index into the text node before the target node if
     /// it can be merged, otherwise creates a new Text node and inserts it before the target node.
-    pub fn try_merge_or_insert_before_text_segment(
+    pub fn try_merge_or_insert_before_text(
         self,
         arena: &mut Arena,
         target_ref: NodeRef,
-        segment: text::Segment,
+        index: text::Index,
     ) -> Result<()> {
-        if let KindData::Text(text_node) = arena.get_mut_result(target_ref)?.kind_data_mut() {
-            if let Some(s) = text_node.segment() {
-                if s.start() == segment.stop() && !text_node.has_qualifiers(TextQualifier::TEMP) {
-                    text_node.textual = Textual::Segment(s.with_start(segment.start()));
+        if let KindData::Text(text_node) = arena.try_get_mut(target_ref)?.kind_data_mut() {
+            if let Some(s) = text_node.index() {
+                if s.start() == index.stop() && !text_node.has_qualifiers(TextQualifier::TEMP) {
+                    text_node.value = (index.start(), s.stop()).into();
                     return Ok(());
                 }
             }
         }
-        let new_node_ref = arena.new_node(Text::new(segment));
+        let new_node_ref = arena.new_node(Text::new(index));
         self.try_insert_before(arena, target_ref, new_node_ref)?;
         Ok(())
     }
@@ -641,7 +635,7 @@ impl Arena {
     }
 
     #[inline(always)]
-    fn get_result(&self, id: NodeRef) -> Result<&Node> {
+    fn try_get(&self, id: NodeRef) -> Result<&Node> {
         self.arena
             .get(id.cell)
             .and_then(|node| node.as_ref())
@@ -655,7 +649,7 @@ impl Arena {
     }
 
     #[inline(always)]
-    fn get_mut_result(&mut self, id: NodeRef) -> Result<&mut Node> {
+    fn try_get_mut(&mut self, id: NodeRef) -> Result<&mut Node> {
         self.arena
             .get_mut(id.cell)
             .and_then(|node| node.as_mut())
@@ -671,18 +665,17 @@ impl Arena {
     /// Creates a new node ref with the given data.
     /// `kind` must consistent with the type of `data`.
     pub fn new_node<T: Into<KindData> + 'static>(&mut self, data: T) -> NodeRef {
+        let node = Node::new(data);
+
         let cell = if let Some(index) = self.free_indicies.pop() {
+            self.arena[index] = Some(node);
             index
         } else {
-            self.arena.len()
+            let index = self.arena.len();
+            self.arena.push(Some(node));
+            index
         };
 
-        if cell >= self.arena.len() {
-            self.arena.push(None);
-        }
-
-        let node = Node::new(data);
-        self.arena[cell] = Some(node);
         let node_ref = NodeRef::new(cell, self.id_seq);
         self.id_seq += 1;
         node_ref
@@ -978,7 +971,7 @@ pub enum BlockType {
 pub struct Block {
     btype: BlockType,
 
-    lines: Option<Vec<text::Segment>>,
+    source: Option<Vec<text::Segment>>,
 
     has_blank_previous_line: bool,
 }
@@ -987,7 +980,7 @@ impl Default for Block {
     fn default() -> Self {
         Self {
             btype: BlockType::Container,
-            lines: Some(Vec::new()),
+            source: Some(Vec::with_capacity(16)),
             has_blank_previous_line: false,
         }
     }
@@ -1006,68 +999,68 @@ impl Block {
         self.btype == BlockType::Leaf
     }
 
-    /// Takes the lines of this block, leaving None in its place.
-    pub fn take_lines(&mut self) -> Vec<text::Segment> {
-        self.lines.take().unwrap()
+    /// Takes the source of this block, leaving None in its place.
+    pub fn take_source(&mut self) -> Vec<text::Segment> {
+        self.source.take().unwrap()
     }
 
-    /// Puts back the lines of this block.
-    pub fn put_back_lines(&mut self, lines: Vec<text::Segment>) {
-        self.lines = Some(lines);
+    /// Puts back the source of this block.
+    pub fn put_back_source(&mut self, source: Vec<text::Segment>) {
+        self.source = Some(source);
     }
 
-    /// Returns the lines of this block.
+    /// Returns the source of this block.
     #[inline(always)]
-    pub fn lines(&self) -> &text::Block {
-        self.lines.as_deref().unwrap_or(&[])
+    pub fn source(&self) -> &text::Block {
+        self.source.as_deref().unwrap_or(&[])
     }
 
-    /// Appends a line to this block.
+    /// Appends a source line to this block.
     #[inline(always)]
-    pub fn append_line(&mut self, line: text::Segment) {
-        if let Some(lines) = &mut self.lines {
-            lines.push(line);
+    pub fn append_source_line(&mut self, line: text::Segment) {
+        if let Some(source) = &mut self.source {
+            source.push(line);
         } else {
-            self.lines = Some(vec![line]);
+            self.source = Some(vec![line]);
         }
     }
 
-    /// Unshifts a line to this block.
+    /// Unshifts a source line to this block.
     #[inline(always)]
-    pub fn unshift_line(&mut self, line: text::Segment) {
-        if let Some(lines) = &mut self.lines {
-            lines.insert(0, line);
+    pub fn unshift_source_line(&mut self, line: text::Segment) {
+        if let Some(source) = &mut self.source {
+            source.insert(0, line);
         } else {
-            self.lines = Some(vec![line]);
+            self.source = Some(vec![line]);
         }
     }
 
-    /// Appends lines to this block.
+    /// Appends source lines to this block.
     #[inline(always)]
-    pub fn append_lines(&mut self, lines: &text::Block) {
-        if let Some(self_lines) = &mut self.lines {
-            self_lines.extend_from_slice(lines);
+    pub fn append_source_lines(&mut self, lines: &text::Block) {
+        if let Some(source) = &mut self.source {
+            source.extend_from_slice(lines);
         } else {
-            self.lines = Some(lines.to_vec());
+            self.source = Some(lines.to_vec());
         }
     }
 
-    /// Replaces a line at the given index with the given line.
+    /// Replaces a source line at the given index with the given line.
     #[inline(always)]
-    pub fn replace_line(&mut self, index: usize, line: text::Segment) {
-        if let Some(lines) = &mut self.lines {
-            if index < lines.len() {
-                lines[index] = line;
+    pub fn replace_source_line(&mut self, index: usize, line: text::Segment) {
+        if let Some(source) = &mut self.source {
+            if index < source.len() {
+                source[index] = line;
             }
         }
     }
 
-    /// Removes a line at the given index.
+    /// Removes a source line at the given index.
     #[inline(always)]
-    pub fn remove_line(&mut self, index: usize) {
-        if let Some(lines) = &mut self.lines {
-            if index < lines.len() {
-                lines.remove(index);
+    pub fn remove_source_line(&mut self, index: usize) {
+        if let Some(source) = &mut self.source {
+            if index < source.len() {
+                source.remove(index);
             }
         }
     }
@@ -1341,11 +1334,11 @@ fn pp(
     let indent3 = pp_indent(level + 2);
     writeln!(w, "{}Ref: {}", indent2, node_ref)?;
     if let TypeData::Block(block) = arena[node_ref].type_data() {
-        if block.lines().is_empty() {
-            writeln!(w, "{}Lines: []", indent2)?;
+        if block.source().is_empty() {
+            writeln!(w, "{}Source: []", indent2)?;
         } else {
-            writeln!(w, "{}Lines: [", indent2)?;
-            for line in block.lines() {
+            writeln!(w, "{}Source: [", indent2)?;
+            for line in block.source() {
                 write!(w, "{}{}", indent3, line.str(source))?;
             }
             writeln!(w)?;
@@ -1510,14 +1503,10 @@ pub fn walk<E: CoreError + 'static>(
     }
 
     if status != WalkStatus::SkipChildren {
-        let node = arena
-            .get_result(node_ref)
-            .map_err(CallbackError::Internal)?;
+        let node = arena.try_get(node_ref).map_err(CallbackError::Internal)?;
         let mut child_opt = node.first_child();
         while let Some(child_ref) = child_opt {
-            let child_node = arena
-                .get_result(child_ref)
-                .map_err(CallbackError::Internal)?;
+            let child_node = arena.try_get(child_ref).map_err(CallbackError::Internal)?;
             if walk(arena, child_ref, walker)? == WalkStatus::Stop {
                 return Ok(WalkStatus::Stop);
             }
@@ -1539,6 +1528,20 @@ pub fn walk<E: CoreError + 'static>(
 // }}} Walk
 
 // Blocks {{{
+
+// BlockText {{{
+
+/// Represents the text content of a block node.
+/// Some block nodes directly contain text content, such as html blocks, while others do not, such as paragraphs.
+#[derive(Debug, Clone)]
+pub enum BlockText {
+    /// The text content is stored in the [`TypeData::Block`] of the node.
+    Source,
+
+    /// The text content is stored in the [`KindData`] of the node.
+    Owned(String),
+}
+// }}}
 
 //   Document {{{
 
@@ -1741,6 +1744,7 @@ pub struct CodeBlock {
     code_block_type: CodeBlockType,
     info: Option<text::Value>,
     fdata: Option<FenceData>,
+    value: BlockText,
 }
 
 impl CodeBlock {
@@ -1750,7 +1754,20 @@ impl CodeBlock {
             code_block_type: typ,
             info,
             fdata: None,
+            value: BlockText::Source,
         }
+    }
+
+    /// Returns the value of the code block.
+    #[inline(always)]
+    pub fn value(&self) -> &BlockText {
+        &self.value
+    }
+
+    /// Sets the value of the code block.
+    #[inline(always)]
+    pub fn set_value(&mut self, value: impl Into<String>) {
+        self.value = BlockText::Owned(value.into());
     }
 
     pub(crate) fn fence_data(&self) -> Option<&FenceData> {
@@ -1824,7 +1841,21 @@ impl PrettyPrint for CodeBlock {
                 Some(info) => info,
                 None => &"<none>",
             }
-        )
+        )?;
+        write!(w, "{}Value: ", pp_indent(level))?;
+        match self.value() {
+            BlockText::Source => {
+                writeln!(w, "Same as source")
+            }
+            BlockText::Owned(text) => {
+                writeln!(w, "[ ")?;
+                for line in text.lines() {
+                    write!(w, "{}{}", pp_indent(level + 1), line)?;
+                }
+                writeln!(w)?;
+                writeln!(w, "{}]", pp_indent(level))
+            }
+        }
     }
 }
 
@@ -2093,15 +2124,31 @@ impl Display for HtmlBlockType {
 #[derive(Debug)]
 pub struct HtmlBlock {
     typ: HtmlBlockType,
+    value: BlockText,
 }
 
 impl HtmlBlock {
     /// Creates a new [`HtmlBlock`] with the given type.
     pub fn new(typ: HtmlBlockType) -> Self {
-        Self { typ }
+        Self {
+            typ,
+            value: BlockText::Source,
+        }
     }
 
-    // Returns an html block type of this item.
+    /// Returns the value of the html block.
+    #[inline(always)]
+    pub fn value(&self) -> &BlockText {
+        &self.value
+    }
+
+    /// Sets the value of the html block.
+    #[inline(always)]
+    pub fn set_value(&mut self, value: impl Into<String>) {
+        self.value = BlockText::Owned(value.into());
+    }
+
+    /// Returns an html block type of this item.
     #[inline(always)]
     pub fn block_type(&self) -> HtmlBlockType {
         self.typ
@@ -2124,7 +2171,21 @@ impl NodeKind for HtmlBlock {
 
 impl PrettyPrint for HtmlBlock {
     fn pretty_print(&self, w: &mut dyn Write, _source: &str, level: usize) -> fmt::Result {
-        writeln!(w, "{}Type: {}", pp_indent(level), self.block_type())
+        writeln!(w, "{}Type: {}", pp_indent(level), self.block_type())?;
+        write!(w, "{}Value: ", pp_indent(level))?;
+        match self.value() {
+            BlockText::Source => {
+                writeln!(w, "Same as source")
+            }
+            BlockText::Owned(text) => {
+                writeln!(w, "[ ")?;
+                for line in text.lines() {
+                    write!(w, "{}{}", pp_indent(level + 1), line)?;
+                }
+                writeln!(w)?;
+                writeln!(w, "{}]", pp_indent(level))
+            }
+        }
     }
 }
 
@@ -2379,69 +2440,45 @@ bitflags! {
     }
 }
 
-/// Represents the textual content.
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum Textual {
-    Segment(text::Segment),
-    String(String),
-}
-
-impl From<text::Segment> for Textual {
-    fn from(seg: text::Segment) -> Textual {
-        Textual::Segment(seg)
-    }
-}
-
-impl<T> From<T> for Textual
-where
-    T: Into<String>,
-{
-    fn from(t: T) -> Textual {
-        Textual::String(t.into())
-    }
-}
-
 /// Represents a text node in the document.
 #[derive(Debug)]
 pub struct Text {
-    textual: Textual,
+    value: text::Value,
 
     qualifiers: TextQualifier,
 }
 
 impl Text {
     /// Creates a new [`Text`] node with the given textual content.
-    pub fn new(textual: impl Into<Textual>) -> Self {
+    pub fn new(textual: impl Into<text::Value>) -> Self {
         let qualifiers = TextQualifier::default();
         Self {
-            textual: textual.into(),
+            value: textual.into(),
             qualifiers,
         }
     }
 
     /// Creates a new [`Text`] node with the given textual content and qualifiers.
-    pub fn with_qualifiers(textual: impl Into<Textual>, qualifiers: TextQualifier) -> Self {
+    pub fn with_qualifiers(textual: impl Into<text::Value>, qualifiers: TextQualifier) -> Self {
         Self {
-            textual: textual.into(),
+            value: textual.into(),
             qualifiers,
         }
     }
 
-    /// The segment of the text.
-    /// If the text is created from a string, returns None.
+    /// Returns the index of the textual content of this text, if it is an index.
     #[inline(always)]
-    pub fn segment(&self) -> Option<&text::Segment> {
-        match self.textual {
-            Textual::Segment(ref seg) => Some(seg),
-            Textual::String(_) => None,
+    pub fn index(&self) -> Option<&text::Index> {
+        match &self.value {
+            text::Value::Index(idx) => Some(idx),
+            _ => None,
         }
     }
 
     /// Sets the textual content of this text.
     #[inline(always)]
-    pub fn set(&mut self, textual: impl Into<Textual>) {
-        self.textual = textual.into();
+    pub fn set(&mut self, value: impl Into<text::Value>) {
+        self.value = value.into();
     }
 
     /// Adds the qualifiers to this text.
@@ -2455,19 +2492,13 @@ impl Text {
     }
 
     /// Returns the bytes of this text.
-    pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
-        match &self.textual {
-            Textual::Segment(seg) => seg.bytes(source),
-            Textual::String(s) => Cow::Borrowed(s.as_bytes()),
-        }
+    pub fn bytes<'a>(&'a self, source: &'a str) -> &'a [u8] {
+        self.value.bytes(source)
     }
 
     /// Returns the UTF-8 string  of this text.
-    pub fn str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        match &self.textual {
-            Textual::Segment(seg) => seg.str(source),
-            Textual::String(s) => Cow::Borrowed(s.as_str()),
-        }
+    pub fn str<'a>(&'a self, source: &'a str) -> &'a str {
+        self.value.str(source)
     }
 }
 
@@ -2753,7 +2784,7 @@ impl From<Image> for KindData {
 /// Represents an inline raw HTML node.
 #[derive(Debug, Default)]
 pub struct RawHtml {
-    lines: Vec<text::Segment>,
+    values: Vec<text::Value>,
 }
 
 impl RawHtml {
@@ -2762,16 +2793,41 @@ impl RawHtml {
         Self::default()
     }
 
-    /// Returns the lines of the raw HTML.
+    /// Adds a value to the raw HTML.
     #[inline(always)]
-    pub fn lines(&self) -> &text::Block {
-        &self.lines
+    pub fn add_value(&mut self, value: text::Value) {
+        self.values.push(value);
     }
 
-    /// Adds a line to the raw HTML.
-    #[inline(always)]
-    pub fn add_line(&mut self, line: text::Segment) {
-        self.lines.push(line);
+    /// Returns the string representation of this raw HTML.
+    pub fn str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
+        if self.values.len() == 1 {
+            if let text::Value::Index(ref index) = self.values[0] {
+                return Cow::Borrowed(index.str(source));
+            }
+        }
+        Cow::Owned(
+            self.values
+                .iter()
+                .map(|v| v.str(source))
+                .collect::<String>(),
+        )
+    }
+
+    /// Returns the bytes of this raw HTML.
+    pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
+        if self.values.len() == 1 {
+            if let text::Value::Index(ref index) = self.values[0] {
+                return Cow::Borrowed(index.bytes(source));
+            }
+        }
+        Cow::Owned(
+            self.values
+                .iter()
+                .flat_map(|v| v.bytes(source))
+                .copied()
+                .collect::<Vec<u8>>(),
+        )
     }
 }
 
@@ -2791,15 +2847,7 @@ impl NodeKind for RawHtml {
 
 impl PrettyPrint for RawHtml {
     fn pretty_print(&self, w: &mut dyn Write, source: &str, level: usize) -> fmt::Result {
-        writeln!(
-            w,
-            "{}RawText: {}",
-            pp_indent(level),
-            self.lines
-                .iter()
-                .map(|line| line.str(source))
-                .collect::<String>()
-        )?;
+        writeln!(w, "{}Value: {}", pp_indent(level), self.str(source))?;
         Ok(())
     }
 }

@@ -89,7 +89,6 @@ use crate::error::{CallbackError, Result};
 use crate::matches_kind;
 use crate::text;
 use crate::text::Reader;
-use crate::text::Segment;
 use crate::util;
 use crate::util::fold_case_full;
 use crate::util::is_blank;
@@ -1353,7 +1352,7 @@ impl Parser {
             return;
         }
 
-        let lines = as_type_data_mut!(arena, block_ref, Block).take_lines();
+        let lines = as_type_data_mut!(arena, block_ref, Block).take_source();
         let mut escaped = false;
         let mut block_reader = text::BlockReader::new(reader.source(), &lines);
 
@@ -1423,10 +1422,8 @@ impl Parser {
                         if i != 0 {
                             let (_, current_position) = block_reader.position();
                             if start_position.stop() == current_position.stop() {
-                                block_ref.merge_or_append_text_segment(
-                                    arena,
-                                    start_position.between(current_position),
-                                );
+                                let bw = start_position.between(current_position);
+                                block_ref.merge_or_append_text(arena, bw.into());
                             }
                             let (_, sp) = block_reader.position();
                             start_position = sp;
@@ -1494,7 +1491,7 @@ impl Parser {
             ip.close_block(arena, block_ref, &mut block_reader, ctx);
         }
 
-        as_type_data_mut!(arena, block_ref, Block).put_back_lines(lines);
+        as_type_data_mut!(arena, block_ref, Block).put_back_source(lines);
     }
 
     fn transform_paragraphs(
@@ -2152,24 +2149,23 @@ impl ParseStackElem {
     }
 
     #[inline(always)]
-    fn segment(&self, arena: &Arena) -> Segment {
+    fn index(&self, arena: &Arena) -> text::Index {
         as_kind_data!(arena, self.node_ref(), Text)
-            .segment()
+            .index()
             .copied()
             .unwrap()
     }
 
-    /// Returns the remaining segment of the parse stack element.
-    fn remaining_segment(&self, arena: &Arena) -> Option<Segment> {
+    fn remaining(&self, arena: &Arena) -> Option<text::Index> {
         match &self.data {
             ParseStackElemData::Delimiter(delim) => {
                 if delim.remaining() == 0 {
                     None
                 } else {
                     let t = as_kind_data!(arena, self.node_ref(), Text);
-                    Some(Segment::new(
-                        t.segment().unwrap().start(),
-                        t.segment().unwrap().start() + delim.remaining(),
+                    Some(text::Index::new(
+                        t.index().unwrap().start(),
+                        t.index().unwrap().start() + delim.remaining(),
                     ))
                 }
             }
@@ -2178,7 +2174,7 @@ impl ParseStackElem {
                 if label.is_consumed() {
                     None
                 } else {
-                    Some(t.segment().copied().unwrap())
+                    Some(t.index().copied().unwrap())
                 }
             }
             ParseStackElemData::LinkBottom(_) => None,
@@ -2556,24 +2552,24 @@ impl<S: ParseStackElemSpec> ParseStack<S> {
     pub fn remove(&mut self, arena: &mut Arena, r: ParseStackElemRef) {
         if let Some(elem) = self.elements.get_mut(r.0).and_then(|e| e.take()) {
             if elem.node_ref() != NODE_REF_UNDEFINED {
-                if let Some(remaining_segment) = elem.remaining_segment(arena) {
+                if let Some(remaining_segment) = elem.remaining(arena) {
                     if let Some(parent_node) = arena[elem.node_ref()].parent() {
                         let previous_node = arena[elem.node_ref()].previous_sibling();
                         if let Some(prev_node_ref) = previous_node {
                             let parent_node = arena[prev_node_ref].parent().unwrap();
-                            parent_node.merge_or_insert_after_text_segment(
+                            parent_node.merge_or_insert_after_text(
                                 arena,
                                 prev_node_ref,
                                 remaining_segment,
                             )
                         } else if let Some(first_child_ref) = arena[parent_node].first_child() {
-                            parent_node.merge_or_insert_before_text_segment(
+                            parent_node.merge_or_insert_before_text(
                                 arena,
                                 first_child_ref,
                                 remaining_segment,
                             )
                         } else {
-                            parent_node.merge_or_append_text_segment(arena, remaining_segment);
+                            parent_node.merge_or_append_text(arena, remaining_segment);
                         }
                     }
                 }

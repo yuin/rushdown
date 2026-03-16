@@ -53,8 +53,8 @@ impl InlineParser for StrikethroughParser {
     ) -> Option<NodeRef> {
         let precending = reader.precending_charater();
         let text = parse_delimiter(arena, parent_ref, reader, 1, &self.processor, ctx)?;
-        let segment = as_kind_data!(arena, text, Text).segment()?;
-        if segment.len() > 2 || precending == '~' {
+        let index = as_kind_data!(arena, text, Text).index()?;
+        if index.len() > 2 || precending == '~' {
             return None;
         }
         Some(text)

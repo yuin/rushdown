@@ -45,6 +45,22 @@ impl Value {
             Value::String(s) => s.as_str(),
         }
     }
+
+    /// Returns true if the value is empty, otherwise false.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Value::Index(index) => index.is_empty(),
+            Value::String(s) => s.is_empty(),
+        }
+    }
+
+    /// Returns the length of the value.
+    pub fn len(&self) -> usize {
+        match self {
+            Value::Index(index) => index.len(),
+            Value::String(s) => s.len(),
+        }
+    }
 }
 
 impl From<&str> for Value {
@@ -131,6 +147,30 @@ impl Index {
     pub fn str<'a>(&'a self, source: &'a str) -> &'a str {
         unsafe { source.get_unchecked(self.start..self.stop) }
     }
+
+    /// Returns true if the index is empty, otherwise false.
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.start >= self.stop
+    }
+
+    /// Returns a new Index with same value except `stop`.
+    #[inline(always)]
+    pub fn with_start(&self, v: usize) -> Index {
+        Index::new(v, self.stop)
+    }
+
+    /// Returns a new Index with same value except `stop`.
+    #[inline(always)]
+    pub fn with_stop(&self, v: usize) -> Index {
+        Index::new(self.start, v)
+    }
+
+    /// Returns the length of the index.
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.stop - self.start
+    }
 }
 
 impl From<Index> for Value {
@@ -142,6 +182,12 @@ impl From<Index> for Value {
 impl From<(usize, usize)> for Index {
     fn from((start, stop): (usize, usize)) -> Self {
         Index::new(start, stop)
+    }
+}
+
+impl From<Segment> for Index {
+    fn from(segment: Segment) -> Self {
+        Index::new(segment.start(), segment.stop())
     }
 }
 
@@ -436,6 +482,12 @@ impl From<(usize, usize)> for Segment {
 impl From<(usize, usize, usize)> for Segment {
     fn from((start, stop, padding): (usize, usize, usize)) -> Self {
         Segment::new_with_padding(start, stop, padding)
+    }
+}
+
+impl From<Index> for Segment {
+    fn from(index: Index) -> Self {
+        Segment::new(index.start(), index.stop())
     }
 }
 

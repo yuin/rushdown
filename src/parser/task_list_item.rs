@@ -34,14 +34,14 @@ impl ParagraphTransformer for TaskListItemParagraphTransformer {
         else {
             return;
         };
-        let mut lines = as_type_data_mut!(arena, paragraph_ref, Block).take_lines();
+        let mut lines = as_type_data_mut!(arena, paragraph_ref, Block).take_source();
         if lines.is_empty() {
-            as_type_data_mut!(arena, paragraph_ref, Block).put_back_lines(lines);
+            as_type_data_mut!(arena, paragraph_ref, Block).put_back_source(lines);
             return;
         }
         let line = lines[0].bytes(reader.source());
         let Some(pos) = scan_task_list_item(&line) else {
-            as_type_data_mut!(arena, paragraph_ref, Block).put_back_lines(lines);
+            as_type_data_mut!(arena, paragraph_ref, Block).put_back_source(lines);
             return;
         };
 
@@ -53,6 +53,6 @@ impl ParagraphTransformer for TaskListItemParagraphTransformer {
             },
         );
         lines[0] = lines[0].with_start(lines[0].start() + pos);
-        as_type_data_mut!(arena, paragraph_ref, Block).put_back_lines(lines);
+        as_type_data_mut!(arena, paragraph_ref, Block).put_back_source(lines);
     }
 }

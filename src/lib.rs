@@ -385,9 +385,9 @@ macro_rules! as_kind_data_mut {
 /// let mut arena = Arena::new();
 /// let para_ref: NodeRef = arena.new_node(Paragraph::new());
 /// let data = as_type_data!(arena, para_ref, Block);
-/// assert!(data.lines().is_empty());
+/// assert!(data.source().is_empty());
 /// let data = as_type_data!(arena[para_ref], Block);
-/// assert!(data.lines().is_empty());
+/// assert!(data.source().is_empty());
 /// ```
 ///
 #[macro_export]

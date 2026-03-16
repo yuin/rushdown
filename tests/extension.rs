@@ -308,7 +308,7 @@ impl AstTransformer for AdmonitionAstTransformer {
             };
             if matches_kind!(arena, fc, Paragraph) {
                 let bd = as_type_data!(arena, fc, Block);
-                if let Some(fl) = bd.lines().iter().next() {
+                if let Some(fl) = bd.source().iter().next() {
                     let line_text = fl.str(reader.source());
                     for kind in &self.options.kinds {
                         let kind = kind.to_uppercase();

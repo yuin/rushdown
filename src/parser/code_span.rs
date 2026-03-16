@@ -85,34 +85,34 @@ impl InlineParser for CodeSpanParser {
                 let bsource = reader.source().as_bytes();
                 {
                     let ftext = as_kind_data_mut!(arena, first_child_ref, Text);
-                    let fseg_ref = ftext.segment().unwrap();
-                    if fseg_ref.is_empty() || !is_space_or_newline(bsource[fseg_ref.start()]) {
+                    let fidx_ref = ftext.index().unwrap();
+                    if fidx_ref.is_empty() || !is_space_or_newline(bsource[fidx_ref.start()]) {
                         return Some(code_span_ref);
                     }
                 }
                 {
                     let last_child_ref = arena[code_span_ref].last_child().unwrap();
                     let ltext = as_kind_data_mut!(arena, last_child_ref, Text);
-                    let lseg_ref = ltext.segment().unwrap();
-                    if lseg_ref.is_empty() || !is_space_or_newline(bsource[lseg_ref.stop() - 1]) {
+                    let lidx_ref = ltext.index().unwrap();
+                    if lidx_ref.is_empty() || !is_space_or_newline(bsource[lidx_ref.stop() - 1]) {
                         return Some(code_span_ref);
                     }
                 }
 
                 let ftext = as_kind_data_mut!(arena, first_child_ref, Text);
-                let fseg = ftext
-                    .segment()
+                let fidx = ftext
+                    .index()
                     .unwrap()
-                    .with_start(ftext.segment().unwrap().start() + 1);
-                ftext.set(fseg);
+                    .with_start(ftext.index().unwrap().start() + 1);
+                ftext.set(fidx);
 
                 let last_child_ref = arena[code_span_ref].last_child().unwrap();
                 let ltext = as_kind_data_mut!(arena, last_child_ref, Text);
-                let lseg = ltext
-                    .segment()
+                let lidx = ltext
+                    .index()
                     .unwrap()
-                    .with_stop(ltext.segment().unwrap().stop() - 1);
-                ltext.set(lseg);
+                    .with_stop(ltext.index().unwrap().stop() - 1);
+                ltext.set(lidx);
             }
         }
         Some(code_span_ref)

@@ -150,7 +150,7 @@ impl MarkdownTestSuite {
     pub fn new(cases: Vec<MarkdownTestCase>) -> Self {
         let mut case_nos: HashMap<u64, usize> = HashMap::new();
         for case in cases.iter() {
-            if case_nos.get(&case.no()).is_some() {
+            if case_nos.contains_key(&case.no()) {
                 panic!("duplicate test case number {}", case.no());
             }
             case_nos.insert(case.no(), 0);
@@ -234,7 +234,10 @@ impl MarkdownTestSuite {
 
     /// Executes all test cases.
     pub fn execute(&self, markdown_to_html: &impl MarkdownToHtml<String>) {
-        println!("");
+        #[allow(clippy::println_empty_string)]
+        {
+            println!("");
+        }
         let target_cases = parse_case_env();
         for case in &self.cases {
             if target_cases.is_empty() || target_cases.contains(&case.no()) {

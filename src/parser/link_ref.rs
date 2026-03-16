@@ -33,7 +33,7 @@ impl ParagraphTransformer for LinkReferenceParagraphTransformer {
         reader: &mut text::BasicReader,
         context: &mut Context,
     ) {
-        let mut lines = as_type_data_mut!(arena, paragraph_ref, Block).take_lines();
+        let mut lines = as_type_data_mut!(arena, paragraph_ref, Block).take_source();
         let mut block = text::BlockReader::new(reader.source(), &lines);
         let mut removes = Vec::<(usize, usize)>::new();
         while let Some((start, mut end)) = parse_link_reference_definition(&mut block, context) {
@@ -61,7 +61,7 @@ impl ParagraphTransformer for LinkReferenceParagraphTransformer {
             }
             paragraph_ref.delete(arena);
         } else {
-            as_type_data_mut!(arena, paragraph_ref, Block).put_back_lines(lines);
+            as_type_data_mut!(arena, paragraph_ref, Block).put_back_source(lines);
         }
     }
 }

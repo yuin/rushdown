@@ -367,9 +367,16 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
                 self.writer.write_safe_str(w, "\"")?;
             }
             self.writer.write_safe_str(w, ">")?;
-            let block = as_type_data!(arena, node_ref, Block);
-            for line in block.lines().iter() {
-                self.writer.raw_write(w, &line.str(source))?;
+            match kd.value() {
+                BlockText::Source => {
+                    let bd = as_type_data!(arena, node_ref, Block);
+                    for line in bd.source().iter() {
+                        self.writer.raw_write(w, &line.str(source))?;
+                    }
+                }
+                BlockText::Owned(value) => {
+                    self.writer.raw_write(w, value)?;
+                }
             }
         } else {
             self.writer.write_safe_str(w, "</code></pre>\n")?;
@@ -466,9 +473,17 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         if entering {
             if self.format_options.allows_unsafe {
-                let block = as_type_data!(arena, node_ref, Block);
-                for line in block.lines().iter() {
-                    self.writer.write_html(w, &line.str(source))?;
+                let kd = as_kind_data!(arena, node_ref, HtmlBlock);
+                match kd.value() {
+                    BlockText::Source => {
+                        let bd = as_type_data!(arena, node_ref, Block);
+                        for line in bd.source().iter() {
+                            self.writer.write_html(w, &line.str(source))?;
+                        }
+                    }
+                    BlockText::Owned(value) => {
+                        self.writer.write_html(w, value)?;
+                    }
                 }
             } else {
                 self.writer
@@ -622,11 +637,11 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         if entering {
             let kd = as_kind_data!(arena, node_ref, Text);
             if kd.has_qualifiers(TextQualifier::CODE) {
-                self.writer.write_html(w, &kd.str(source))?;
+                self.writer.write_html(w, kd.str(source))?;
             } else if kd.has_qualifiers(TextQualifier::RAW) {
-                self.writer.raw_write(w, &kd.str(source))?;
+                self.writer.raw_write(w, kd.str(source))?;
             } else {
-                self.writer.write(w, &kd.str(source))?;
+                self.writer.write(w, kd.str(source))?;
                 if kd.has_qualifiers(TextQualifier::HARD_LINE_BREAK)
                     || (kd.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
                         && self.format_options.hard_wraps)
@@ -784,9 +799,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         if entering {
             let kd = as_kind_data!(arena, node_ref, RawHtml);
             if self.format_options.allows_unsafe {
-                for line in kd.lines().iter() {
-                    self.writer.write_html(w, &line.str(source))?;
-                }
+                self.writer.write_html(w, &kd.str(source))?;
             } else {
                 self.writer.write_safe_str(w, "<!-- raw HTML omitted -->")?;
             }
@@ -1009,54 +1022,52 @@ impl Writer {
     /// - replacing HTML entities(`<`, `>`, `&`, `"`, `'`, and so on)
     pub fn write<W: TextWrite>(&self, w: &mut W, s: &str) -> Result<()> {
         let bytes = s.as_bytes();
-        let len = s.len();
         let mut i = 0usize;
-        let mut n = 0usize;
-        while i < len {
-            let c = bytes[i];
+
+        while let Some(rel) = memchr::memchr2(b'\\', b'&', &bytes[i..]) {
+            self.raw_write(w, &s[i..i + rel])?;
+            let c = bytes[i + rel];
             if c == b'\\' {
-                match try_unescape_punct(bytes, i, self.options.escaped_space) {
+                match try_unescape_punct(bytes, i + rel, self.options.escaped_space) {
                     UnescapePunctResult::Punct(nbyte, ch) => {
-                        self.raw_write(w, &s[n..i])?;
                         if let Some(esc) = try_escape_html_byte(ch) {
                             w.write_str(esc)?;
                         } else {
                             w.write_char(ch as char)?;
                         }
-                        i = i + nbyte + 1;
-                        n = i;
+                        i += rel + nbyte + 1;
                         continue;
                     }
                     UnescapePunctResult::Skipped(nbyte) => {
-                        self.raw_write(w, &s[n..i])?;
-                        i = i + nbyte + 1;
-                        n = i;
+                        i += rel + nbyte + 1;
                         continue;
                     }
-                    UnescapePunctResult::None => {}
+                    UnescapePunctResult::None => {
+                        w.write_char('\\')?;
+                    }
                 }
             }
             if c == b'&' {
-                if let Some((nbyte, ch)) = try_resolve_numeric_reference(bytes, i) {
-                    self.raw_write(w, &s[n..i])?;
+                if let Some((nbyte, ch)) = try_resolve_numeric_reference(bytes, i + rel) {
                     let mut buf = [0u8; 4];
                     let s: &str = ch.encode_utf8(&mut buf);
                     self.raw_write(w, s)?;
-                    i = i + nbyte + 1;
-                    n = i;
+                    i += rel + nbyte + 1;
                     continue;
                 }
-                if let Some((nbyte, ch)) = try_resolve_entity_reference(bytes, i) {
-                    self.raw_write(w, &s[n..i])?;
+                if let Some((nbyte, ch)) = try_resolve_entity_reference(bytes, i + rel) {
                     self.raw_write(w, ch)?;
-                    i = i + nbyte + 1;
-                    n = i;
+                    i += rel + nbyte + 1;
                     continue;
                 }
+                w.write_str("&amp;")?;
             }
-            i += 1;
+            i += rel + 1;
         }
-        self.raw_write(w, &s[n..])
+        if i != bytes.len() {
+            self.raw_write(w, &s[i..])?;
+        }
+        Ok(())
     }
 
     /// Writes the given `s` to `w` with:
@@ -1068,13 +1079,7 @@ impl Writer {
         let mut n = 0;
 
         for (i, &b) in bytes.iter().enumerate() {
-            if b == b'\0' {
-                if i != n {
-                    write_bytes(w, &bytes[n..i])?;
-                }
-                w.write_char(REPLACEMENT_CHAR)?;
-                n = i + 1;
-            } else if let Some(rep) = try_escape_html_byte(b) {
+            if let Some(rep) = try_escape_html_byte(b) {
                 if i != n {
                     write_bytes(w, &bytes[n..i])?;
                 }

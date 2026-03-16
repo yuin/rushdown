@@ -596,6 +596,6 @@ fn scan_url_path(buffer: &[u8]) -> Option<usize> {
 pub(crate) fn scan_task_list_item(buffer: &[u8]) -> Option<usize> {
     let mut i = 0;
     i += starts_with(buffer, i, &["[X]", "[x]", "[ ]"], false)?;
-    return Some(i);
+    Some(i)
 }
 // }}}
