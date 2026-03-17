@@ -154,7 +154,7 @@ impl BlockParser for FencedCodeBlockParser {
                 let info_start = segment.start() - segment.padding() + i + left;
                 let info_stop = segment.stop() - right;
                 let value = &rest[left..rest.len() - right];
-                if fdata.char == b'`' && value.contains(&b'`') {
+                if fdata.char == b'`' && memchr::memchr(b'`', value).is_some() {
                     return None;
                 } else if info_start != info_stop {
                     info = Some((info_start, info_stop).into());

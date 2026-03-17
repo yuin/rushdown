@@ -2430,13 +2430,9 @@ bitflags! {
         /// back slash escapes and resolving references.
         const RAW = 1 << 2;
 
-        /// Indicates given text should be rendered without any
-        /// modifications, such as escaping HTML characters.
-        const CODE = 1 << 3;
-
         /// Indicates given text is temporary and might be removed
         /// later during processing.
-        const TEMP = 1 << 4;
+        const TEMP = 1 << 3;
     }
 }
 

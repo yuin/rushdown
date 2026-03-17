@@ -636,9 +636,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         if entering {
             let kd = as_kind_data!(arena, node_ref, Text);
-            if kd.has_qualifiers(TextQualifier::CODE) {
-                self.writer.write_html(w, kd.str(source))?;
-            } else if kd.has_qualifiers(TextQualifier::RAW) {
+            if kd.has_qualifiers(TextQualifier::RAW) {
                 self.writer.raw_write(w, kd.str(source))?;
             } else {
                 self.writer.write(w, kd.str(source))?;
