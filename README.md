@@ -311,11 +311,14 @@ assert_eq!(
 
 Walkng the AST: You can not mutate the AST while walking it. If you want to mutate the AST, collect the node refs and mutate them after walking.
 
+`md_ast` macro can be used to build AST more easily.
+
 ```rust
 use core::result::Result;
 use core::error::Error;
 use core::fmt::{self, Display, Formatter};
 use rushdown::ast::*;
+use rushdown::md_ast;
 use rushdown::matches_kind;
 
 #[derive(Debug)]
@@ -330,16 +333,18 @@ impl Display for UserError {
 }
 
 let mut arena = Arena::default();
-let doc_ref = arena.new_node(Document::new());
-let paragraph_ref1 = arena.new_node(Paragraph::new());
-let text1 = arena.new_node(Text::new("Hello, World!"));
-let paragraph_ref2 = arena.new_node(Paragraph::new());
-let text2 = arena.new_node(Text::new("This is a test."));
-
-doc_ref.append_child(&mut arena, paragraph_ref1);
-paragraph_ref1.append_child(&mut arena, text1);
-doc_ref.append_child(&mut arena, paragraph_ref2);
-paragraph_ref2.append_child(&mut arena, text2);
+let doc_ref = md_ast!(&mut arena, Document::new() => {
+    Blockquote::new() => {
+        Paragraph::new(); { |node: &mut Node| {
+            node.attributes_mut().insert("class", "paragraph".into());
+        } } => {
+            Text::new("Hello, World!")
+        },
+        Paragraph::new() => {
+            Text::new("This is a test.")
+        }
+    }
+});
 
 let mut target: Option<NodeRef> = None;
 
@@ -360,8 +365,9 @@ walk(&arena, doc_ref, &mut |arena: &Arena,
     }
     Ok(WalkStatus::Continue)
 }).ok();
-assert_eq!(target, Some(paragraph_ref2));
+assert_eq!(target, Some(arena[arena[doc_ref].first_child().unwrap()].last_child().unwrap()) );
 ```
+
 
 ## Extending rushdown <a name="extending-rushdown"></a>
 See `tests/extension.rs` and `override_renderer.rs` for examples of how to extend rushdown.

@@ -445,6 +445,74 @@ macro_rules! as_type_data_mut {
     };
 }
 
+/// Helper macro to construct an AST.
+///
+/// # Examples
+/// ```rust
+/// use rushdown::md_ast;
+/// use rushdown::ast::*;
+/// use rushdown::renderer::html;
+///
+/// let mut arena = Arena::new();
+/// let doc = md_ast!(&mut arena, Document::new() => {
+///     Blockquote::new() => {
+///         Paragraph::new(); { |node: &mut Node| {
+///             node.attributes_mut().insert("class", "paragraph".into());
+///         } } => {
+///             Text::new("Hello, World!")
+///         },
+///         Paragraph::new() => {
+///             Text::new("This is a test.")
+///         }
+///     }
+/// });
+/// let renderer = html::Renderer::with_options(html::Options::default());
+/// let mut output = String::new();
+/// renderer.render(&mut output, "", &arena, doc).expect("Failed to render HTML");
+/// assert_eq!(output, "<blockquote>\n<p class=\"paragraph\">Hello, World!</p>\n<p>This is a test.</p>\n</blockquote>\n");
+/// ```
+#[macro_export]
+macro_rules! md_ast {
+    ($arena:expr, $root:expr => { $($children:tt)* }) => {{
+        let __root = $arena.new_node($root);
+        md_ast!(@children $arena, __root, { $($children)* });
+        __root
+    }};
+
+    // make a node, optional post hook written as: ;{ <expr> }
+    (@mk $arena:expr, $spec:expr) => {{
+        $arena.new_node($spec)
+    }};
+    (@mk $arena:expr, $spec:expr, @{ $post:expr }) => {{
+        let __n = $arena.new_node($spec);
+        ($post)(&mut $arena[__n]);
+        __n
+    }};
+
+    (@children $arena:expr, $parent:ident, { }) => {};
+
+    // child with grandchildren
+    (@children $arena:expr, $parent:ident, {
+        $child:expr $( ;{ $post:expr } )? => { $($grand:tt)* } $(, $($rest:tt)*)?
+    }) => {{
+        let __child = md_ast!(@mk $arena, $child $(, @{ $post })?);
+        $parent.append_child($arena, __child);
+
+        md_ast!(@children $arena, __child, { $($grand)* });
+        md_ast!(@children $arena, $parent, { $($($rest)*)? });
+    }};
+
+    // leaf child
+    (@children $arena:expr, $parent:ident, {
+        $child:expr $( ;{ $post:expr } )? $(, $($rest:tt)*)?
+    }) => {{
+        let __child = md_ast!(@mk $arena, $child $(, ;{ $post })?);
+        $parent.append_child($arena, __child);
+
+        md_ast!(@children $arena, $parent, { $($($rest)*)? });
+    }};
+}
+
 // }}} macros
 
 // debug stuff {{{
