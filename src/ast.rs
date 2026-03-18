@@ -787,6 +787,7 @@ pub enum KindData {
     Link(Link),
     Image(Image),
     RawHtml(RawHtml),
+    LinkReferenceDefinition(LinkReferenceDefinition),
 
     Table(Table),
     TableHeader(TableHeader),
@@ -818,6 +819,7 @@ impl KindData {
             KindData::Link(n) => n.typ(),
             KindData::Image(n) => n.typ(),
             KindData::RawHtml(n) => n.typ(),
+            KindData::LinkReferenceDefinition(n) => n.typ(),
 
             KindData::Table(n) => n.typ(),
             KindData::TableHeader(n) => n.typ(),
@@ -849,6 +851,7 @@ impl KindData {
             KindData::Link(n) => n.kind_name(),
             KindData::Image(n) => n.kind_name(),
             KindData::RawHtml(n) => n.kind_name(),
+            KindData::LinkReferenceDefinition(n) => n.kind_name(),
 
             KindData::Table(n) => n.kind_name(),
             KindData::TableHeader(n) => n.kind_name(),
@@ -880,6 +883,7 @@ impl KindData {
             KindData::Link(n) => n.is_atomic(),
             KindData::Image(n) => n.is_atomic(),
             KindData::RawHtml(n) => n.is_atomic(),
+            KindData::LinkReferenceDefinition(n) => n.is_atomic(),
 
             KindData::Table(n) => n.is_atomic(),
             KindData::TableHeader(n) => n.is_atomic(),
@@ -911,6 +915,7 @@ impl KindData {
             KindData::Link(n) => n.pretty_print(w, source, level),
             KindData::Image(n) => n.pretty_print(w, source, level),
             KindData::RawHtml(n) => n.pretty_print(w, source, level),
+            KindData::LinkReferenceDefinition(n) => n.pretty_print(w, source, level),
 
             KindData::Table(n) => n.pretty_print(w, source, level),
             KindData::TableHeader(n) => n.pretty_print(w, source, level),
@@ -1338,10 +1343,15 @@ fn pp(
             writeln!(w, "{}Source: []", indent2)?;
         } else {
             writeln!(w, "{}Source: [", indent2)?;
+            let mut nr = false;
             for line in block.source() {
-                write!(w, "{}{}", indent3, line.str(source))?;
+                let l = line.str(source);
+                write!(w, "{}{}", indent3, l)?;
+                nr = l.ends_with('\n') || l.ends_with('\r');
             }
-            writeln!(w)?;
+            if !nr {
+                writeln!(w)?;
+            }
             writeln!(w, "{}]", indent2)?;
         }
         if block.has_blank_previous_line() {
@@ -1540,6 +1550,12 @@ pub enum BlockText {
 
     /// The text content is stored in the [`KindData`] of the node.
     Owned(String),
+}
+
+impl From<String> for BlockText {
+    fn from(s: String) -> Self {
+        BlockText::Owned(s)
+    }
 }
 // }}}
 
@@ -1766,8 +1782,8 @@ impl CodeBlock {
 
     /// Sets the value of the code block.
     #[inline(always)]
-    pub fn set_value(&mut self, value: impl Into<String>) {
-        self.value = BlockText::Owned(value.into());
+    pub fn set_value(&mut self, value: impl Into<BlockText>) {
+        self.value = value.into();
     }
 
     pub(crate) fn fence_data(&self) -> Option<&FenceData> {
@@ -1794,7 +1810,7 @@ impl CodeBlock {
     }
 
     /// Returns the language of the fenced code block, if specified.
-    pub fn language<'a>(&'a self, source: &'a str) -> Option<&'a str> {
+    pub fn language_str<'a>(&'a self, source: &'a str) -> Option<&'a str> {
         match &self.info {
             Some(info) => {
                 let info_str = info.str(source);
@@ -2144,8 +2160,8 @@ impl HtmlBlock {
 
     /// Sets the value of the html block.
     #[inline(always)]
-    pub fn set_value(&mut self, value: impl Into<String>) {
-        self.value = BlockText::Owned(value.into());
+    pub fn set_value(&mut self, value: impl Into<BlockText>) {
+        self.value = value.into();
     }
 
     /// Returns an html block type of this item.
@@ -2196,6 +2212,119 @@ impl From<HtmlBlock> for KindData {
 }
 
 //   }}} HtmlBlock
+
+//   LinkReferenceDefinition {{{
+
+/// Represents a link reference definition node.
+#[derive(Debug)]
+pub struct LinkReferenceDefinition {
+    label: text::Value,
+    destination: text::Value,
+    title: Option<text::Value>,
+}
+
+impl LinkReferenceDefinition {
+    /// Creates a new [`LinkReferenceDefinition`] node.
+    pub fn new(label: impl Into<text::Value>, destination: impl Into<text::Value>) -> Self {
+        Self {
+            label: label.into(),
+            destination: destination.into(),
+            title: None,
+        }
+    }
+
+    /// Creates a new [`LinkReferenceDefinition`] node with a title.
+    pub fn with_title(
+        label: impl Into<text::Value>,
+        destination: impl Into<text::Value>,
+        title: impl Into<text::Value>,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            destination: destination.into(),
+            title: Some(title.into()),
+        }
+    }
+
+    /// Returns the label of the link reference definition.
+    #[inline(always)]
+    pub fn label(&self) -> &text::Value {
+        &self.label
+    }
+
+    /// Returns the string representation of the label of the link reference definition.
+    #[inline(always)]
+    pub fn label_str<'a>(&'a self, source: &'a str) -> &'a str {
+        self.label.str(source)
+    }
+
+    /// Returns the destination of the link reference definition.
+    #[inline(always)]
+    pub fn destination(&self) -> &text::Value {
+        &self.destination
+    }
+
+    /// Returns the string representation of the destination of the link reference definition.
+    #[inline(always)]
+    pub fn destination_str<'a>(&'a self, source: &'a str) -> &'a str {
+        self.destination.str(source)
+    }
+
+    /// Returns the title of the link reference definition.
+    #[inline(always)]
+    pub fn title(&self) -> Option<&text::Value> {
+        self.title.as_ref()
+    }
+
+    /// Returns the string representation of the title of the link reference definition.
+    #[inline(always)]
+    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<&'a str> {
+        self.title.as_ref().map(|t| t.str(source))
+    }
+}
+
+impl NodeKind for LinkReferenceDefinition {
+    fn typ(&self) -> NodeType {
+        NodeType::LeafBlock
+    }
+
+    fn kind_name(&self) -> &'static str {
+        "LinkReferenceDefinition"
+    }
+
+    fn is_atomic(&self) -> bool {
+        true
+    }
+}
+
+impl PrettyPrint for LinkReferenceDefinition {
+    fn pretty_print(&self, w: &mut dyn Write, source: &str, level: usize) -> fmt::Result {
+        writeln!(w, "{}Label: {}", pp_indent(level), self.label.str(source))?;
+        writeln!(
+            w,
+            "{}Destination: {}",
+            pp_indent(level),
+            self.destination.str(source)
+        )?;
+        writeln!(
+            w,
+            "{}Title: {}",
+            pp_indent(level),
+            match &self.title {
+                Some(title) => title.str(source),
+                None => "<None>",
+            }
+        )
+    }
+}
+
+impl From<LinkReferenceDefinition> for KindData {
+    fn from(data: LinkReferenceDefinition) -> Self {
+        KindData::LinkReferenceDefinition(data)
+    }
+}
+
+//   }}} LinkReferenceDefinition
 
 // GFM {{{
 //   Table {{{
@@ -2626,11 +2755,20 @@ pub struct Link {
 }
 
 impl Link {
-    /// Creates a new Link with the given destination and optional title.
-    pub fn new(destination: impl Into<text::Value>, title: Option<impl Into<text::Value>>) -> Self {
+    /// Creates a new Link with the given destination.
+    pub fn new(destination: impl Into<text::Value>) -> Self {
         Self {
             destination: destination.into(),
-            title: title.map(|t| t.into()),
+            title: None,
+            auto_link_text: None,
+        }
+    }
+
+    /// Creates a new Link with the given destination and title.
+    pub fn with_title(destination: impl Into<text::Value>, title: impl Into<text::Value>) -> Self {
+        Self {
+            destination: destination.into(),
+            title: Some(title.into()),
             auto_link_text: None,
         }
     }
@@ -2650,16 +2788,35 @@ impl Link {
         &self.destination
     }
 
+    /// Returns the string representation of the destination of the link.
+    #[inline(always)]
+    pub fn destination_str<'a>(&'a self, source: &'a str) -> &'a str {
+        self.destination.str(source)
+    }
+
     /// Returns the title of the link, if it exists.
     #[inline(always)]
     pub fn title(&self) -> Option<&text::Value> {
         self.title.as_ref()
     }
 
+    /// Returns the string representation of the title of the link, if it exists.
+    #[inline(always)]
+    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<&'a str> {
+        self.title.as_ref().map(|t| t.str(source))
+    }
+
     /// Returns the auto link text of the link, if this is an auto link.
     #[inline(always)]
     pub fn auto_link_text(&self) -> Option<&text::Value> {
         self.auto_link_text.as_ref()
+    }
+
+    /// Returns the string representation of the auto link text of the link, if this is an auto
+    /// link.
+    #[inline(always)]
+    pub fn auto_link_text_str<'a>(&'a self, source: &'a str) -> Option<&'a str> {
+        self.auto_link_text.as_ref().map(|t| t.str(source))
     }
 
     /// Returns true if this link is an auto link.
@@ -2721,11 +2878,19 @@ pub struct Image {
 }
 
 impl Image {
-    /// Creates a new Image with the given destination and optional title.
-    pub fn new(destination: impl Into<text::Value>, title: Option<impl Into<text::Value>>) -> Self {
+    /// Creates a new Image with the given destination.
+    pub fn new(destination: impl Into<text::Value>) -> Self {
         Self {
             destination: destination.into(),
-            title: title.map(|t| t.into()),
+            title: None,
+        }
+    }
+
+    /// Creates a new Image with the given destination and title.
+    pub fn with_title(destination: impl Into<text::Value>, title: impl Into<text::Value>) -> Self {
+        Self {
+            destination: destination.into(),
+            title: Some(title.into()),
         }
     }
 
@@ -2735,10 +2900,22 @@ impl Image {
         &self.destination
     }
 
+    /// Returns the string representation of the destination of the link.
+    #[inline(always)]
+    pub fn destination_str<'a>(&'a self, source: &'a str) -> &'a str {
+        self.destination.str(source)
+    }
+
     /// Returns the title of the link, if it exists.
     #[inline(always)]
     pub fn title(&self) -> Option<&text::Value> {
         self.title.as_ref()
+    }
+
+    /// Returns the string representation of the title of the link, if it exists.
+    #[inline(always)]
+    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<&'a str> {
+        self.title.as_ref().map(|t| t.str(source))
     }
 }
 

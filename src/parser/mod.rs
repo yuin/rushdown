@@ -243,58 +243,11 @@ pub struct ContextOptions {
 
 //   Context {{{
 
-/// A link reference definition.
-#[derive(Debug)]
-pub struct LinkReference {
-    label: String,
-    destination: String,
-    title: Option<String>,
-}
-
-impl LinkReference {
-    /// Creates a new [`LinkReference`].
-    pub fn new(label: impl Into<String>, destination: impl Into<String>) -> Self {
-        LinkReference {
-            label: label.into(),
-            destination: destination.into(),
-            title: None,
-        }
-    }
-
-    /// Creates a new [`LinkReference`] with a title.
-    pub fn with_title(
-        label: impl Into<String>,
-        destination: impl Into<String>,
-        title: impl Into<String>,
-    ) -> Self {
-        LinkReference {
-            label: label.into(),
-            destination: destination.into(),
-            title: Some(title.into()),
-        }
-    }
-
-    /// Returns the label of the link reference.
-    pub fn label(&self) -> &str {
-        &self.label
-    }
-
-    /// Returns the destination of the link reference.
-    pub fn destination(&self) -> &str {
-        &self.destination
-    }
-
-    /// Returns the title of the link reference.
-    pub fn title(&self) -> Option<&str> {
-        self.title.as_deref()
-    }
-}
-
 /// A context for parsing operations.
 pub struct Context {
     base: context::Context,
     ids: NodeIds,
-    link_references: Option<HashMap<String, LinkReference>>,
+    link_references: Option<HashMap<String, NodeRef>>,
     block_offset: Option<usize>,
     block_indent: Option<usize>,
 
@@ -366,35 +319,35 @@ impl Context {
     }
 
     /// Adds a link reference definition to the context.
-    pub fn add_link_reference(&mut self, link_ref: LinkReference) {
+    pub fn add_link_reference(&mut self, label: impl AsRef<str>, node_ref: NodeRef) {
         if self.link_references.is_none() {
             self.link_references = Some(HashMap::new());
         }
         if let Some(map) = &mut self.link_references {
-            let link_ref_key = to_link_reference(link_ref.label().as_bytes());
+            let link_ref_key = to_link_reference(label.as_ref().as_bytes());
             let key = unsafe { core::str::from_utf8_unchecked(&link_ref_key) };
             // If there are several matching definitions, the first one takes precedence
             if !map.contains_key(key) {
-                map.insert(key.to_string(), link_ref);
+                map.insert(key.to_string(), node_ref);
             }
         }
     }
 
     /// Gets a link reference definition by label.
-    pub fn link_reference(&self, label: &str) -> Option<&LinkReference> {
+    pub fn link_reference(&self, label: &str) -> Option<NodeRef> {
         if let Some(map) = &self.link_references {
-            map.get(label)
+            map.get(label).copied()
         } else {
             None
         }
     }
 
     /// Gets all link reference definitions.
-    pub fn link_references(&self) -> Vec<&LinkReference> {
+    pub fn link_references(&self) -> Vec<NodeRef> {
         if let Some(map) = &self.link_references {
             let mut refs = Vec::with_capacity(map.len());
             for v in map.values() {
-                refs.push(v);
+                refs.push(*v);
             }
             refs
         } else {
@@ -2552,24 +2505,20 @@ impl<S: ParseStackElemSpec> ParseStack<S> {
     pub fn remove(&mut self, arena: &mut Arena, r: ParseStackElemRef) {
         if let Some(elem) = self.elements.get_mut(r.0).and_then(|e| e.take()) {
             if elem.node_ref() != NODE_REF_UNDEFINED {
-                if let Some(remaining_segment) = elem.remaining(arena) {
+                if let Some(remaining) = elem.remaining(arena) {
                     if let Some(parent_node) = arena[elem.node_ref()].parent() {
                         let previous_node = arena[elem.node_ref()].previous_sibling();
                         if let Some(prev_node_ref) = previous_node {
                             let parent_node = arena[prev_node_ref].parent().unwrap();
-                            parent_node.merge_or_insert_after_text(
-                                arena,
-                                prev_node_ref,
-                                remaining_segment,
-                            )
+                            parent_node.merge_or_insert_after_text(arena, prev_node_ref, remaining)
                         } else if let Some(first_child_ref) = arena[parent_node].first_child() {
                             parent_node.merge_or_insert_before_text(
                                 arena,
                                 first_child_ref,
-                                remaining_segment,
+                                remaining,
                             )
                         } else {
-                            parent_node.merge_or_append_text(arena, remaining_segment);
+                            parent_node.merge_or_append_text(arena, remaining);
                         }
                     }
                 }

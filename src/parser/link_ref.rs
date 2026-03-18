@@ -1,18 +1,16 @@
 extern crate alloc;
 
-use alloc::string::ToString;
 use alloc::vec::Vec;
 
-use crate::as_type_data_mut;
-use crate::ast::{Arena, NodeRef};
+use crate::ast::{Arena, LinkReferenceDefinition, NodeRef};
 use crate::parser::{
-    parse_link_destination, parse_link_title, Context, LinkReference, ParagraphTransformer,
-    ParseLinkTitleResult,
+    parse_link_destination, parse_link_title, Context, ParagraphTransformer, ParseLinkTitleResult,
 };
 use crate::text::block_to_str;
 use crate::text::{self, Reader, EOS};
 use crate::util::indent_width;
 use crate::util::is_blank;
+use crate::{as_kind_data, as_type_data_mut};
 
 /// [`ParagraphTransformer`] that extracts link reference definitions from paragraphs.
 #[derive(Debug, Default)]
@@ -35,18 +33,27 @@ impl ParagraphTransformer for LinkReferenceParagraphTransformer {
     ) {
         let mut lines = as_type_data_mut!(arena, paragraph_ref, Block).take_source();
         let mut block = text::BlockReader::new(reader.source(), &lines);
-        let mut removes = Vec::<(usize, usize)>::new();
-        while let Some((start, mut end)) = parse_link_reference_definition(&mut block, context) {
+        let mut removes = Vec::<(NodeRef, usize, usize)>::new();
+        while let Some((link_ref, start, mut end)) = parse_link_reference_definition(
+            arena,
+            arena[paragraph_ref].parent().unwrap(),
+            paragraph_ref,
+            &mut block,
+            context,
+        ) {
             if start == end {
                 end += 1
             }
-            removes.push((start, end));
+            removes.push((link_ref, start, end));
         }
         let mut offset = 0;
-        for (start, end) in removes {
+        for (link_ref, start, end) in removes {
             if lines.is_empty() {
                 break;
             }
+            let ll = &lines[start - offset..end - offset];
+            as_type_data_mut!(arena, link_ref, Block).append_source_lines(ll);
+
             let s1 = lines[end - offset..].to_vec();
             lines = lines[..start - offset].to_vec();
             lines.extend_from_slice(&s1);
@@ -67,9 +74,12 @@ impl ParagraphTransformer for LinkReferenceParagraphTransformer {
 }
 
 fn parse_link_reference_definition<'a>(
+    arena: &mut Arena,
+    parent: NodeRef,
+    paragraph: NodeRef,
     reader: &mut text::BlockReader<'a>,
     ctx: &mut Context,
-) -> Option<(usize, usize)> {
+) -> Option<(NodeRef, usize, usize)> {
     reader.skip_spaces();
     let (line, _) = reader.peek_line_bytes()?;
     let (start_line, _) = reader.position();
@@ -131,10 +141,18 @@ fn parse_link_reference_definition<'a>(
         if !has_newline {
             return None;
         }
-        let link_ref = LinkReference::new(label, destination.str(reader.source()));
-        ctx.add_link_reference(link_ref);
+        let link_ref = arena.new_node(LinkReferenceDefinition::new(label, destination));
+        parent.insert_before(arena, paragraph, link_ref);
+        ctx.add_link_reference(
+            as_kind_data!(arena, link_ref, LinkReferenceDefinition).label_str(reader.source()),
+            link_ref,
+        );
         let (end_line, _) = reader.position();
-        return Some((start_line, end_line + if end_line != line { 0 } else { 1 }));
+        return Some((
+            link_ref,
+            start_line,
+            end_line + if end_line != line { 0 } else { 1 },
+        ));
     }
 
     if !has_spaces {
@@ -148,20 +166,24 @@ fn parse_link_reference_definition<'a>(
         if !has_newline {
             return None;
         }
-        let link_ref = LinkReference::new(label, destination.str(reader.source()));
-        ctx.add_link_reference(link_ref);
+        let link_ref = arena.new_node(LinkReferenceDefinition::new(label, destination));
+        parent.insert_before(arena, paragraph, link_ref);
+        ctx.add_link_reference(
+            as_kind_data!(arena, link_ref, LinkReferenceDefinition).label_str(reader.source()),
+            link_ref,
+        );
         let (end_line, _) = reader.position();
-        return Some((start_line, end_line));
+        return Some((link_ref, start_line, end_line));
     }
     if let ParseLinkTitleResult::Ok(t) = title_result {
-        let link_ref = LinkReference::with_title(
-            label,
-            destination.str(reader.source()),
-            t.str(reader.source()).to_string(),
+        let link_ref = arena.new_node(LinkReferenceDefinition::with_title(label, destination, t));
+        parent.insert_before(arena, paragraph, link_ref);
+        ctx.add_link_reference(
+            as_kind_data!(arena, link_ref, LinkReferenceDefinition).label_str(reader.source()),
+            link_ref,
         );
-        ctx.add_link_reference(link_ref);
         let (end_line, _) = reader.position();
-        Some((start_line, end_line + 1))
+        Some((link_ref, start_line, end_line + 1))
     } else {
         None
     }

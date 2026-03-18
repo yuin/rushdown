@@ -343,6 +343,7 @@ pub struct RendererHelper<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> {
     list_override: bool,
     list_item_override: bool,
     html_block_override: bool,
+    link_reference_definition_override: bool,
 
     table_override: bool,
     table_header_override: bool,
@@ -444,6 +445,7 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
             list_override: false,
             list_item_override: false,
             html_block_override: false,
+            link_reference_definition_override: false,
 
             table_override: false,
             table_header_override: false,
@@ -725,6 +727,20 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
                     HtmlBlock,
                     html_block_override,
                     render_html_block,
+                    writer,
+                    source,
+                    arena,
+                    node_ref,
+                    entering,
+                    context
+                );
+            }
+            KindData::LinkReferenceDefinition(_) => {
+                render_buitin!(
+                    self,
+                    LinkReferenceDefinition,
+                    link_reference_definition_override,
+                    render_link_reference_definition,
                     writer,
                     source,
                     arena,
@@ -1016,6 +1032,17 @@ pub trait BuiltinNodesRenderer<W> {
 
     /// Renders an html block node.
     fn render_html_block<'a>(
+        &self,
+        writer: &mut W,
+        source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        context: &mut Context,
+    ) -> Result<WalkStatus>;
+
+    /// Renders a link reference definition node.
+    fn render_link_reference_definition<'a>(
         &self,
         writer: &mut W,
         source: &'a str,

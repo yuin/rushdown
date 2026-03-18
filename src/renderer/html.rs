@@ -361,7 +361,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         if entering {
             self.writer.write_safe_str(w, "<pre><code")?;
             let kd = as_kind_data!(arena, node_ref, CodeBlock);
-            if let Some(lang) = kd.language(source) {
+            if let Some(lang) = kd.language_str(source) {
                 self.writer.write_safe_str(w, " class=\"language-")?;
                 self.writer.write(w, lang)?;
                 self.writer.write_safe_str(w, "\"")?;
@@ -493,6 +493,17 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         Ok(WalkStatus::Continue)
     }
 
+    fn render_link_reference_definition<'a>(
+        &self,
+        _writer: &mut W,
+        _source: &'a str,
+        _arena: &'a Arena,
+        _node_ref: NodeRef,
+        _entering: bool,
+        _context: &mut Context,
+    ) -> Result<WalkStatus> {
+        Ok(WalkStatus::SkipChildren)
+    }
     fn render_table<'a>(
         &self,
         w: &mut W,

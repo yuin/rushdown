@@ -1,13 +1,12 @@
 extern crate alloc;
 use crate::ast::{Arena, Image, Link, NodeRef, Text, TextQualifier};
-use crate::matches_kind;
 use crate::parser::{
     process_delimiters, Context, InlineParser, LinkLabel, ParseStackElemData, ParseStackElemRef,
 };
 use crate::text::{self, block_to_bytes, block_to_value, Reader, Segment, EOS};
 use crate::util::{is_blank, is_punct, is_space, to_link_reference};
+use crate::{as_kind_data, matches_kind};
 use alloc::string::String;
-use alloc::string::ToString;
 
 /// [`InlineParser`] for links.
 #[derive(Debug, Default)]
@@ -116,17 +115,18 @@ impl InlineParser for LinkParser {
                 ctx.link_bottoms_mut().remove_top(arena);
                 return None;
             };
-            link_opt = Some(Link::new(
-                link_ref.destination(),
-                link_ref.title().map(|t| t.to_string()),
-            ));
+            let ref_def = as_kind_data!(arena, link_ref, LinkReferenceDefinition);
+            link_opt = Some(match ref_def.title() {
+                Some(t) => Link::with_title(ref_def.destination(), t),
+                None => Link::new(ref_def.destination()),
+            });
         }
         let link = link_opt.expect("should parsed");
         let link_ref = if is_image {
-            arena.new_node(Image::new(
-                link.destination().clone(),
-                link.title().cloned(),
-            ))
+            arena.new_node(match link.title() {
+                Some(t) => Image::with_title(link.destination().clone(), t.clone()),
+                None => Image::new(link.destination().clone()),
+            })
         } else {
             arena.new_node(link)
         };
@@ -203,11 +203,12 @@ fn parse_reference_link(
 
     let maybe_link_ref = to_link_reference(maybe_link_ref);
     let link_ref = ctx.link_reference(String::from_utf8_lossy(&maybe_link_ref).as_ref())?;
+    let ref_def = as_kind_data!(arena, link_ref, LinkReferenceDefinition);
 
-    Some(Link::new(
-        link_ref.destination(),
-        link_ref.title().map(|t| t.to_string()),
-    ))
+    Some(match ref_def.title() {
+        Some(t) => Link::with_title(ref_def.destination(), t),
+        None => Link::new(ref_def.destination()),
+    })
 }
 
 fn process_link_label(
@@ -257,8 +258,10 @@ fn parse_link(reader: &mut text::BlockReader) -> Option<Link> {
         }
     }
     let destination = destination.unwrap_or_else(|| "".into());
-    let link = Link::new(destination, title);
-    Some(link)
+    Some(match title {
+        Some(t) => Link::with_title(destination, t),
+        None => Link::new(destination),
+    })
 }
 
 pub(super) enum ParseLinkTitleResult {

@@ -93,6 +93,27 @@ impl From<&[char]> for Value {
     }
 }
 
+impl From<Cow<'_, [u8]>> for Value {
+    fn from(s: Cow<'_, [u8]>) -> Self {
+        Value::String(String::from_utf8_lossy(&s).into_owned())
+    }
+}
+
+impl From<Cow<'_, str>> for Value {
+    fn from(s: Cow<'_, str>) -> Self {
+        Value::String(s.into_owned())
+    }
+}
+
+impl From<&Value> for Value {
+    fn from(v: &Value) -> Self {
+        match v {
+            Value::Index(index) => Value::Index(*index),
+            Value::String(s) => Value::String(s.clone()),
+        }
+    }
+}
+
 impl From<(usize, usize)> for Value {
     fn from((start, stop): (usize, usize)) -> Self {
         Value::Index(Index::new(start, stop))
@@ -331,7 +352,9 @@ impl Segment {
 
     /// Returns the bytes of the segment from the source.
     pub fn bytes<'a>(&self, source: &'a str) -> Cow<'a, [u8]> {
-        if self.padding == 0 && !self.force_newline {
+        if self.padding == 0
+            && (!self.force_newline || source.as_bytes().get(self.stop - 1) == Some(&b'\n'))
+        {
             Cow::Borrowed(&source.as_bytes()[self.start..self.stop])
         } else {
             let mut result = Vec::with_capacity(self.padding() + self.stop - self.start + 1);
@@ -349,7 +372,9 @@ impl Segment {
     /// # Safety
     /// This method does not check the validity of UTF-8 boundaries.
     pub fn str<'a>(&self, source: &'a str) -> Cow<'a, str> {
-        if self.padding == 0 && !self.force_newline {
+        if self.padding == 0
+            && (!self.force_newline || source.as_bytes().get(self.stop - 1) == Some(&b'\n'))
+        {
             unsafe { Cow::Borrowed(source.get_unchecked(self.start..self.stop)) }
         } else {
             let mut result = String::with_capacity(self.padding() + self.stop - self.start + 1);
