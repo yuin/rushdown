@@ -1,6 +1,6 @@
 use core::cmp::max;
 
-use crate::ast::{Arena, CodeBlock, CodeBlockType, FenceData, NodeRef};
+use crate::ast::{Arena, CodeBlock, CodeBlockKind, FenceData, NodeRef};
 use crate::parser::{BlockParser, Context, State};
 use crate::text::{Reader as _, Segment};
 use crate::util::{
@@ -38,7 +38,7 @@ impl BlockParser for IndentedCodeBlockParser {
             return None;
         }
         let (pos, padding) = indent_position(line.as_ref(), reader.line_offset(), 4)?;
-        let code_block_ref = arena.new_node(CodeBlock::new(CodeBlockType::Indented, None));
+        let code_block_ref = arena.new_node(CodeBlock::new(CodeBlockKind::Indented, None));
         reader.advance_and_set_padding(pos, padding);
         let (_, mut segment) = reader.peek_line_bytes().unwrap();
         // if code block line starts with a tab, keep a tab as it is.
@@ -161,7 +161,7 @@ impl BlockParser for FencedCodeBlockParser {
                 }
             }
         }
-        let node_ref = arena.new_node(CodeBlock::new(CodeBlockType::Fenced, info));
+        let node_ref = arena.new_node(CodeBlock::new(CodeBlockKind::Fenced, info));
         as_kind_data_mut!(arena, node_ref, CodeBlock).set_fence_data(fdata);
         Some((node_ref, State::NO_CHILDREN))
     }

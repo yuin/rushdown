@@ -1817,10 +1817,10 @@ impl From<ThematicBreak> for KindData {
 
 //   CodeBlock {{{
 
-/// Types of code blocks.
-#[derive(Debug, PartialEq, Eq)]
+/// Kinds of code blocks.
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[non_exhaustive]
-pub enum CodeBlockType {
+pub enum CodeBlockKind {
     Indented,
     Fenced,
 }
@@ -1835,7 +1835,7 @@ pub(crate) struct FenceData {
 /// Represents a code block node.
 #[derive(Debug)]
 pub struct CodeBlock {
-    code_block_type: CodeBlockType,
+    code_block_kind: CodeBlockKind,
     info: Option<text::Value>,
     fdata: Option<FenceData>,
     value: BlockText,
@@ -1843,13 +1843,19 @@ pub struct CodeBlock {
 
 impl CodeBlock {
     /// Creates a new [`CodeBlock`] node.
-    pub fn new(typ: CodeBlockType, info: Option<text::Value>) -> Self {
+    pub fn new(typ: CodeBlockKind, info: Option<text::Value>) -> Self {
         Self {
-            code_block_type: typ,
+            code_block_kind: typ,
             info,
             fdata: None,
             value: BlockText::Source,
         }
+    }
+
+    /// Returns the kind of the code block.
+    #[inline(always)]
+    pub fn code_block_kind(&self) -> CodeBlockKind {
+        self.code_block_kind
     }
 
     /// Returns the value of the code block.
@@ -1920,11 +1926,11 @@ impl PrettyPrint for CodeBlock {
     fn pretty_print(&self, w: &mut dyn Write, source: &str, level: usize) -> fmt::Result {
         writeln!(
             w,
-            "{}CodeBlockType: {}",
+            "{}CodeBlockKind: {}",
             pp_indent(level),
-            match self.code_block_type {
-                CodeBlockType::Indented => "Indented",
-                CodeBlockType::Fenced => "Fenced",
+            match self.code_block_kind {
+                CodeBlockKind::Indented => "Indented",
+                CodeBlockKind::Fenced => "Fenced",
             }
         )?;
         writeln!(
@@ -2186,30 +2192,30 @@ impl From<ListItem> for KindData {
 
 //   HtmlBlock {{{
 
-/// HTMLBlockType represents kinds of an html blocks.
+/// HTMLBlockKind represents kinds of an html blocks.
 /// See <https://spec.commonmark.org/0.30/#html-blocks>
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum HtmlBlockType {
-    Type1,
-    Type2,
-    Type3,
-    Type4,
-    Type5,
-    Type6,
-    Type7,
+pub enum HtmlBlockKind {
+    Kind1,
+    Kind2,
+    Kind3,
+    Kind4,
+    Kind5,
+    Kind6,
+    Kind7,
 }
 
-impl Display for HtmlBlockType {
+impl Display for HtmlBlockKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            HtmlBlockType::Type1 => write!(f, "Type1"),
-            HtmlBlockType::Type2 => write!(f, "Type2"),
-            HtmlBlockType::Type3 => write!(f, "Type3"),
-            HtmlBlockType::Type4 => write!(f, "Type4"),
-            HtmlBlockType::Type5 => write!(f, "Type5"),
-            HtmlBlockType::Type6 => write!(f, "Type6"),
-            HtmlBlockType::Type7 => write!(f, "Type7"),
+            HtmlBlockKind::Kind1 => write!(f, "Kind1"),
+            HtmlBlockKind::Kind2 => write!(f, "Kind2"),
+            HtmlBlockKind::Kind3 => write!(f, "Kind3"),
+            HtmlBlockKind::Kind4 => write!(f, "Kind4"),
+            HtmlBlockKind::Kind5 => write!(f, "Kind5"),
+            HtmlBlockKind::Kind6 => write!(f, "Kind6"),
+            HtmlBlockKind::Kind7 => write!(f, "Kind7"),
         }
     }
 }
@@ -2217,15 +2223,15 @@ impl Display for HtmlBlockType {
 /// Represents an HTML block node.
 #[derive(Debug)]
 pub struct HtmlBlock {
-    typ: HtmlBlockType,
+    html_block_kind: HtmlBlockKind,
     value: BlockText,
 }
 
 impl HtmlBlock {
     /// Creates a new [`HtmlBlock`] with the given type.
-    pub fn new(typ: HtmlBlockType) -> Self {
+    pub fn new(typ: HtmlBlockKind) -> Self {
         Self {
-            typ,
+            html_block_kind: typ,
             value: BlockText::Source,
         }
     }
@@ -2242,10 +2248,10 @@ impl HtmlBlock {
         self.value = value.into();
     }
 
-    /// Returns an html block type of this item.
+    /// Returns an html block kind of this item.
     #[inline(always)]
-    pub fn block_type(&self) -> HtmlBlockType {
-        self.typ
+    pub fn html_block_kind(&self) -> HtmlBlockKind {
+        self.html_block_kind
     }
 }
 
@@ -2265,7 +2271,12 @@ impl NodeKind for HtmlBlock {
 
 impl PrettyPrint for HtmlBlock {
     fn pretty_print(&self, w: &mut dyn Write, _source: &str, level: usize) -> fmt::Result {
-        writeln!(w, "{}Type: {}", pp_indent(level), self.block_type())?;
+        writeln!(
+            w,
+            "{}HtmlBlockKind: {}",
+            pp_indent(level),
+            self.html_block_kind()
+        )?;
         write!(w, "{}Value: ", pp_indent(level))?;
         match self.value() {
             BlockText::Source => {

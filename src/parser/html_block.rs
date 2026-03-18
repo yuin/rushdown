@@ -1,4 +1,4 @@
-use crate::ast::{Arena, HtmlBlock, HtmlBlockType, NodeRef};
+use crate::ast::{Arena, HtmlBlock, HtmlBlockKind, NodeRef};
 use crate::parser::{BlockParser, Context, State};
 use crate::scanner::{
     scan_html_block_close_1, scan_html_block_close_2, scan_html_block_close_3,
@@ -35,17 +35,17 @@ impl BlockParser for HtmlBlockParser {
     ) -> Option<(NodeRef, State)> {
         let (line, segment) = reader.peek_line_bytes()?;
         let node_ref = if scan_html_block_open_1(&line).is_some() {
-            arena.new_node(HtmlBlock::new(HtmlBlockType::Type1))
+            arena.new_node(HtmlBlock::new(HtmlBlockKind::Kind1))
         } else if scan_html_block_open_2(&line).is_some() {
-            arena.new_node(HtmlBlock::new(HtmlBlockType::Type2))
+            arena.new_node(HtmlBlock::new(HtmlBlockKind::Kind2))
         } else if scan_html_block_open_3(&line).is_some() {
-            arena.new_node(HtmlBlock::new(HtmlBlockType::Type3))
+            arena.new_node(HtmlBlock::new(HtmlBlockKind::Kind3))
         } else if scan_html_block_open_4(&line).is_some() {
-            arena.new_node(HtmlBlock::new(HtmlBlockType::Type4))
+            arena.new_node(HtmlBlock::new(HtmlBlockKind::Kind4))
         } else if scan_html_block_open_5(&line).is_some() {
-            arena.new_node(HtmlBlock::new(HtmlBlockType::Type5))
+            arena.new_node(HtmlBlock::new(HtmlBlockKind::Kind5))
         } else if scan_html_block_open_6(&line).is_some() {
-            arena.new_node(HtmlBlock::new(HtmlBlockType::Type6))
+            arena.new_node(HtmlBlock::new(HtmlBlockKind::Kind6))
         } else if scan_html_block_open_7(&line).is_some() {
             // type 7 can not interrupt paragraph
             if let Some(last) = ctx.last_opened_block() {
@@ -53,7 +53,7 @@ impl BlockParser for HtmlBlockParser {
                     return None;
                 }
             }
-            arena.new_node(HtmlBlock::new(HtmlBlockType::Type7))
+            arena.new_node(HtmlBlock::new(HtmlBlockKind::Kind7))
         } else {
             return None;
         };
@@ -69,20 +69,20 @@ impl BlockParser for HtmlBlockParser {
         reader: &mut text::BasicReader,
         _ctx: &mut Context,
     ) -> Option<State> {
-        let typ = as_kind_data!(arena, node_ref, HtmlBlock).block_type();
+        let kind = as_kind_data!(arena, node_ref, HtmlBlock).html_block_kind();
         let (line, segment) = reader.peek_line_bytes()?;
-        if typ == HtmlBlockType::Type6 || typ == HtmlBlockType::Type7 {
+        if kind == HtmlBlockKind::Kind6 || kind == HtmlBlockKind::Kind7 {
             if is_blank(&line) {
                 reader.advance_to_eol();
                 return None;
             }
         } else {
-            let f = match typ {
-                HtmlBlockType::Type1 => scan_html_block_close_1,
-                HtmlBlockType::Type2 => scan_html_block_close_2,
-                HtmlBlockType::Type3 => scan_html_block_close_3,
-                HtmlBlockType::Type4 => scan_html_block_close_4,
-                HtmlBlockType::Type5 => scan_html_block_close_5,
+            let f = match kind {
+                HtmlBlockKind::Kind1 => scan_html_block_close_1,
+                HtmlBlockKind::Kind2 => scan_html_block_close_2,
+                HtmlBlockKind::Kind3 => scan_html_block_close_3,
+                HtmlBlockKind::Kind4 => scan_html_block_close_4,
+                HtmlBlockKind::Kind5 => scan_html_block_close_5,
                 _ => |_: &[u8]| None,
             };
             // Check if the opening line contains the closing pattern
