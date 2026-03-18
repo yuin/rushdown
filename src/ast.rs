@@ -490,6 +490,12 @@ impl NodeRef {
             }
         }
         let new_node_ref = arena.new_node(Text::new(index));
+        #[cfg(feature = "inline-pos")]
+        {
+            use crate::as_type_data_mut;
+
+            as_type_data_mut!(arena, new_node_ref, Inline).set_pos(index.start());
+        }
         self.try_append_child(arena, new_node_ref)?;
         Ok(())
     }
@@ -530,6 +536,12 @@ impl NodeRef {
             }
         }
         let new_node_ref = arena.new_node(Text::new(index));
+        #[cfg(feature = "inline-pos")]
+        {
+            use crate::as_type_data_mut;
+
+            as_type_data_mut!(arena, new_node_ref, Inline).set_pos(index.start());
+        }
         self.try_insert_after(arena, target_ref, new_node_ref)?;
         Ok(())
     }
@@ -562,11 +574,23 @@ impl NodeRef {
             if let Some(s) = text_node.index() {
                 if s.start() == index.stop() && !text_node.has_qualifiers(TextQualifier::TEMP) {
                     text_node.value = (index.start(), s.stop()).into();
+                    #[cfg(feature = "inline-pos")]
+                    {
+                        use crate::as_type_data_mut;
+
+                        as_type_data_mut!(arena, target_ref, Inline).set_pos(index.start());
+                    }
                     return Ok(());
                 }
             }
         }
         let new_node_ref = arena.new_node(Text::new(index));
+        #[cfg(feature = "inline-pos")]
+        {
+            use crate::as_type_data_mut;
+
+            as_type_data_mut!(arena, new_node_ref, Inline).set_pos(index.start());
+        }
         self.try_insert_before(arena, target_ref, new_node_ref)?;
         Ok(())
     }
@@ -950,7 +974,7 @@ impl From<NodeType> for TypeData {
                 btype: BlockType::Leaf,
                 ..Default::default()
             }),
-            NodeType::Inline => TypeData::Inline(Inline {}),
+            NodeType::Inline => TypeData::Inline(Inline::new()),
         }
     }
 }
@@ -1081,11 +1105,58 @@ impl Block {
     pub fn set_blank_previous_line(&mut self, value: bool) {
         self.has_blank_previous_line = value;
     }
+
+    /// Returns the position of this block in the source text.
+    pub fn pos(&self) -> usize {
+        self.source
+            .as_ref()
+            .and_then(|s| s.first())
+            .map(|s| s.start())
+            .unwrap_or(0)
+    }
 }
 
 /// A Data associated with inline type nodes.
 #[derive(Debug)]
-pub struct Inline {}
+pub struct Inline {
+    #[cfg(feature = "inline-pos")]
+    pos: Option<usize>,
+}
+
+impl Default for Inline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Inline {
+    /// Creates a new Inline data.
+    pub fn new() -> Self {
+        Self {
+            #[cfg(feature = "inline-pos")]
+            pos: None,
+        }
+    }
+
+    /// Returns the position of this inline node in the source text.
+    #[cfg(feature = "inline-pos")]
+    #[inline(always)]
+    pub fn pos(&self) -> usize {
+        self.pos.unwrap_or(0)
+    }
+
+    /// Sets the position of this inline node in the source text.
+    #[cfg(feature = "inline-pos")]
+    #[inline(always)]
+    pub fn set_pos(&mut self, pos: usize) {
+        self.pos = Some(pos);
+    }
+
+    #[cfg(feature = "inline-pos")]
+    pub(crate) fn has_pos(&self) -> bool {
+        self.pos.is_some()
+    }
+}
 
 /// Represents a node in the document.
 #[derive(Debug)]
@@ -1339,6 +1410,7 @@ fn pp(
     let indent3 = pp_indent(level + 2);
     writeln!(w, "{}Ref: {}", indent2, node_ref)?;
     if let TypeData::Block(block) = arena[node_ref].type_data() {
+        writeln!(w, "{}Pos: {}", indent2, block.pos())?;
         if block.source().is_empty() {
             writeln!(w, "{}Source: []", indent2)?;
         } else {
@@ -1358,6 +1430,12 @@ fn pp(
             writeln!(w, "{}HasBlankPreviousLine: true", indent2)?;
         } else {
             writeln!(w, "{}HasBlankPreviousLine: false", indent2)?;
+        }
+    }
+    #[cfg(feature = "inline-pos")]
+    {
+        if let TypeData::Inline(inline) = arena[node_ref].type_data() {
+            writeln!(w, "{}Pos: {}", indent2, inline.pos())?;
         }
     }
 

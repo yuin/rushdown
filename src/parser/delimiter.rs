@@ -148,6 +148,13 @@ pub fn process_delimiters(arena: &mut Arena, bottom: Option<ParseStackElemRef>, 
         ctx.delimiters_mut().data_mut(closer_ref).consume(consume);
 
         let node_ref = (ctx.delimiters().data(opener_ref).processor().on_match)(arena, consume);
+        #[cfg(feature = "inline-pos")]
+        {
+            use crate::{as_type_data, as_type_data_mut};
+            let opener = ctx.delimiters().elem(opener_ref).node_ref();
+            let pos = as_type_data!(arena, opener, Inline).pos();
+            as_type_data_mut!(arena, node_ref, Inline).set_pos(pos);
+        }
         let o = ctx.delimiters().elem(opener_ref).node_ref();
         let p_opt = arena[o].parent();
         let mut c_opt = arena[o].next_sibling();

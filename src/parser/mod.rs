@@ -1386,6 +1386,21 @@ impl Parser {
                             let ip = &self.inline_parsers[ip_idx];
                             inline_node_ref_opt =
                                 ip.parse(arena, block_ref, &mut block_reader, ctx);
+                            #[cfg(feature = "inline-pos")]
+                            {
+                                if let Some(inline_node_ref) = inline_node_ref_opt {
+                                    {
+                                        use crate::as_type_data;
+
+                                        if !as_type_data!(arena, inline_node_ref, Inline).has_pos()
+                                        {
+                                            as_type_data_mut!(arena, inline_node_ref, Inline)
+                                                .set_pos(saved_position.start());
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
                             if inline_node_ref_opt.is_some() {
                                 break;
                             }
@@ -1434,6 +1449,10 @@ impl Parser {
                 text_node.add_qualifiers(TextQualifier::HARD_LINE_BREAK);
             }
             let text_node_ref = arena.new_node(text_node);
+            #[cfg(feature = "inline-pos")]
+            {
+                as_type_data_mut!(arena, text_node_ref, Inline).set_pos(diff.start());
+            }
             block_ref.append_child_fast(arena, text_node_ref);
             block_reader.advance_line();
         }
