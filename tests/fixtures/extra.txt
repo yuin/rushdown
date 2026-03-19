@@ -884,3 +884,43 @@ options: {enableEscape=true}
 //- - - - - - - - -//
 <h1>A</h1>
 //= = = = = = = = = = = = = = = = = = = = = = = =//
+
+71: Nested multiline reference links(shortcut)
+//- - - - - - - - -//
+> [foo
+> bar]
+
+[foo bar]: /url "title"
+//- - - - - - - - -//
+<blockquote>
+<p><a href="/url" title="title">foo
+bar</a></p>
+</blockquote>
+//= = = = = = = = = = = = = = = = = = = = = = = =//
+
+72: Nested multiline reference links(collapsed)
+//- - - - - - - - -//
+> [foo
+> bar][]
+
+[foo bar]: /url "title"
+//- - - - - - - - -//
+<blockquote>
+<p><a href="/url" title="title">foo
+bar</a></p>
+</blockquote>
+//= = = = = = = = = = = = = = = = = = = = = = = =//
+
+73: Nested multiline reference links(full)
+//- - - - - - - - -//
+> [foo
+> bar][foo
+> bar]
+
+[foo bar]: /url "title"
+//- - - - - - - - -//
+<blockquote>
+<p><a href="/url" title="title">foo
+bar</a></p>
+</blockquote>
+//= = = = = = = = = = = = = = = = = = = = = = = =//

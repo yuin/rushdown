@@ -223,6 +223,23 @@ impl From<Segment> for Index {
 /// Each segment does not contain multiple lines.
 pub type Block = [Segment];
 
+fn binary_search_block_pos(block: &Block, pos: usize) -> Option<usize> {
+    let mut left = 0;
+    let mut right = block.len();
+    while left < right {
+        let mid = (left + right) / 2;
+        if block[mid].start() <= pos && pos < block[mid].stop() {
+            return Some(mid);
+        }
+        if pos < block[mid].start() {
+            right = mid;
+        } else {
+            left = mid + 1;
+        }
+    }
+    None
+}
+
 /// Converts a [`Block`] to a Value.
 pub fn block_to_value(i: impl IntoIterator<Item = Segment>, source: &str) -> Value {
     let mut b = i.into_iter();
@@ -895,7 +912,15 @@ impl<'a> BlockReader<'a> {
         line: usize,
         pos: Segment,
     ) -> impl Iterator<Item = Segment> + 'a {
-        BetweenBlockIterator::new(
+        if line == self.line.unwrap_or(0) {
+            let seg = self.block[line];
+            if pos.start() >= seg.start() && self.pos.start() <= seg.stop() {
+                return BetweenBlockIterator::single(
+                    (pos.start(), self.pos.start(), pos.padding()).into(),
+                );
+            }
+        }
+        BetweenBlockIterator::multi(
             BlockReader {
                 source: self.source,
                 bsource: self.bsource,
@@ -910,27 +935,78 @@ impl<'a> BlockReader<'a> {
             pos,
         )
     }
+
+    /// Returns an iterator that yields segments between the given range.
+    pub fn between(&self, range: Segment) -> impl Iterator<Item = Segment> + 'a {
+        let from_line = binary_search_block_pos(self.block, range.start()).unwrap_or(0);
+        let to_line =
+            binary_search_block_pos(self.block, range.stop()).unwrap_or(self.block.len() - 1);
+
+        if from_line == to_line {
+            let seg = self.block[from_line];
+            if range.start() >= seg.start() && range.stop() <= seg.stop() {
+                return BetweenBlockIterator::single(range);
+            }
+        }
+
+        let mut to_pos = self.block[to_line];
+        to_pos.start = range.stop();
+
+        let mut from_pos = self.block[from_line];
+        from_pos.start = range.start();
+
+        BetweenBlockIterator::multi(
+            BlockReader {
+                source: self.source,
+                bsource: self.bsource,
+                block: self.block,
+                line: Some(to_line),
+                pos: to_pos,
+                head: 0,
+                last: 0,
+                line_offset: None,
+            },
+            from_line,
+            from_pos,
+        )
+    }
 }
 
-struct BetweenBlockIterator<'a> {
+struct MultilineBetweenBlock<'a> {
     reader: BlockReader<'a>,
     start_line: usize,
     start_pos: Segment,
     current_line: usize,
     current_pos: Segment,
+}
+
+struct BetweenBlockIterator<'a> {
+    multi: Option<MultilineBetweenBlock<'a>>,
+    single: Option<Segment>,
     done: bool,
 }
 
 impl<'a> BetweenBlockIterator<'a> {
-    fn new(mut reader: BlockReader<'a>, line: usize, pos: Segment) -> BetweenBlockIterator<'a> {
+    fn multi(mut reader: BlockReader<'a>, line: usize, pos: Segment) -> BetweenBlockIterator<'a> {
         let (current_line, current_pos) = reader.position();
         reader.set_position(line, pos);
         BetweenBlockIterator {
-            reader,
-            start_line: line,
-            start_pos: pos,
-            current_line,
-            current_pos,
+            multi: Some(MultilineBetweenBlock {
+                reader,
+                start_line: line,
+                start_pos: pos,
+                current_line,
+                current_pos,
+            }),
+            single: None,
+            done: false,
+        }
+    }
+
+    fn single(segment: Segment) -> BetweenBlockIterator<'a> {
+        BetweenBlockIterator {
+            multi: None,
+            single: Some(segment),
             done: false,
         }
     }
@@ -943,25 +1019,32 @@ impl<'a> Iterator for BetweenBlockIterator<'a> {
         if self.done {
             return None;
         }
-        let (ln, _) = self.reader.position();
-        let (_, segment) = self.reader.peek_line_bytes()?;
-        let start = if ln == self.start_line {
-            self.start_pos.start()
-        } else {
-            segment.start()
-        };
-        let stop = if ln == self.current_line {
-            self.current_pos.start()
-        } else {
-            segment.stop()
-        };
-        let seg = Segment::new(start, stop);
-        if ln == self.current_line {
-            self.reader.advance(stop - start);
+        if let Some(s) = self.single {
             self.done = true;
+            return Some(s);
         }
-        self.reader.advance_line();
-        Some(seg)
+        if let Some(m) = &mut self.multi {
+            let (ln, _) = m.reader.position();
+            let (_, segment) = m.reader.peek_line_bytes()?;
+            let start = if ln == m.start_line {
+                m.start_pos.start()
+            } else {
+                segment.start()
+            };
+            let stop = if ln == m.current_line {
+                m.current_pos.start()
+            } else {
+                segment.stop()
+            };
+            let seg = Segment::new(start, stop);
+            if ln == m.current_line {
+                m.reader.advance(stop - start);
+                self.done = true;
+            }
+            m.reader.advance_line();
+            return Some(seg);
+        }
+        None
     }
 }
 

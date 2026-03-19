@@ -2833,6 +2833,37 @@ impl From<Emphasis> for KindData {
 
 //   Link {{{
 
+/// Kinds of links.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum LinkKind {
+    Inline,
+    Reference(LinkReference),
+    Auto(AutoLink),
+}
+
+/// Kinds of link references.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LinkReferenceKind {
+    Full,
+    Collapsed,
+    Shortcut,
+}
+
+/// Represents a link reference in the document.
+#[derive(Debug)]
+pub struct LinkReference {
+    value: text::Value,
+    reference_kind: LinkReferenceKind,
+}
+
+/// Represents an auto link in the document.
+#[derive(Debug)]
+pub struct AutoLink {
+    text: text::Value,
+}
+
 /// Represents a link in the document.
 #[derive(Debug)]
 pub struct Link {
@@ -2840,25 +2871,61 @@ pub struct Link {
 
     title: Option<text::Value>,
 
-    auto_link_text: Option<text::Value>,
+    link_kind: LinkKind,
 }
 
 impl Link {
-    /// Creates a new Link with the given destination.
-    pub fn new(destination: impl Into<text::Value>) -> Self {
+    /// Creates a new inline link with the given destination.
+    pub fn inline(destination: impl Into<text::Value>) -> Self {
         Self {
             destination: destination.into(),
             title: None,
-            auto_link_text: None,
+            link_kind: LinkKind::Inline,
         }
     }
 
-    /// Creates a new Link with the given destination and title.
-    pub fn with_title(destination: impl Into<text::Value>, title: impl Into<text::Value>) -> Self {
+    /// Creates a new inline link with the given destination and title.
+    pub fn inline_with_title(
+        destination: impl Into<text::Value>,
+        title: impl Into<text::Value>,
+    ) -> Self {
         Self {
             destination: destination.into(),
             title: Some(title.into()),
-            auto_link_text: None,
+            link_kind: LinkKind::Inline,
+        }
+    }
+
+    /// Creates a new reference link with the given destination and reference value.
+    pub fn reference(
+        destination: impl Into<text::Value>,
+        value: impl Into<text::Value>,
+        reference_kind: LinkReferenceKind,
+    ) -> Self {
+        Self {
+            destination: destination.into(),
+            title: None,
+            link_kind: LinkKind::Reference(LinkReference {
+                value: value.into(),
+                reference_kind,
+            }),
+        }
+    }
+
+    /// Creates a new reference link with the given destination, reference value and title.
+    pub fn reference_with_title(
+        destination: impl Into<text::Value>,
+        value: impl Into<text::Value>,
+        reference_kind: LinkReferenceKind,
+        title: impl Into<text::Value>,
+    ) -> Self {
+        Self {
+            destination: destination.into(),
+            title: Some(title.into()),
+            link_kind: LinkKind::Reference(LinkReference {
+                value: value.into(),
+                reference_kind,
+            }),
         }
     }
 
@@ -2867,7 +2934,7 @@ impl Link {
         Self {
             destination: destination.into(),
             title: None,
-            auto_link_text: Some(text.into()),
+            link_kind: LinkKind::Auto(AutoLink { text: text.into() }),
         }
     }
 
@@ -2895,22 +2962,10 @@ impl Link {
         self.title.as_ref().map(|t| t.str(source))
     }
 
-    /// Returns the auto link text of the link, if this is an auto link.
+    /// Returns the kind of this link.
     #[inline(always)]
-    pub fn auto_link_text(&self) -> Option<&text::Value> {
-        self.auto_link_text.as_ref()
-    }
-
-    /// Returns the string representation of the auto link text of the link, if this is an auto
-    /// link.
-    #[inline(always)]
-    pub fn auto_link_text_str<'a>(&'a self, source: &'a str) -> Option<&'a str> {
-        self.auto_link_text.as_ref().map(|t| t.str(source))
-    }
-
-    /// Returns true if this link is an auto link.
-    pub fn is_auto_link(&self) -> bool {
-        self.auto_link_text.is_some()
+    pub fn link_kind(&self) -> &LinkKind {
+        &self.link_kind
     }
 }
 
@@ -2926,14 +2981,32 @@ impl NodeKind for Link {
 
 impl PrettyPrint for Link {
     fn pretty_print(&self, w: &mut dyn Write, source: &str, level: usize) -> fmt::Result {
-        if let Some(auto_text) = &self.auto_link_text {
-            writeln!(w, "{}AutoLink: true", pp_indent(level),)?;
-            writeln!(
-                w,
-                "{}AutoLinkText: {}",
-                pp_indent(level),
-                auto_text.str(source)
-            )?;
+        match self.link_kind() {
+            LinkKind::Inline => writeln!(w, "{}LinkKind: Inline", pp_indent(level))?,
+            LinkKind::Reference(reference) => {
+                writeln!(w, "{}LinkKind: Reference", pp_indent(level))?;
+                writeln!(
+                    w,
+                    "{}ReferenceLabel: {}",
+                    pp_indent(level),
+                    reference.value.str(source)
+                )?;
+                writeln!(
+                    w,
+                    "{}ReferenceKind: {:?}",
+                    pp_indent(level),
+                    reference.reference_kind
+                )?;
+            }
+            LinkKind::Auto(auto) => {
+                writeln!(w, "{}LinkKind: Auto", pp_indent(level))?;
+                writeln!(
+                    w,
+                    "{}AutoLinkText: {}",
+                    pp_indent(level),
+                    auto.text.str(source)
+                )?;
+            }
         }
         writeln!(
             w,

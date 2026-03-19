@@ -741,7 +741,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
                 let mut u = escape_url(
                     dest.as_bytes(),
                     &EscapeUrlOptions {
-                        resolves_refs: !kd.is_auto_link(),
+                        resolves_refs: !matches!(kd.link_kind(), LinkKind::Auto(_)),
                         ..EscapeUrlOptions::for_url()
                     },
                 );

@@ -1,5 +1,5 @@
 extern crate alloc;
-use crate::ast::{Arena, Image, Link, NodeRef, Text, TextQualifier};
+use crate::ast::{Arena, Image, Link, LinkReferenceKind, NodeRef, Text, TextQualifier};
 use crate::parser::{
     process_delimiters, Context, InlineParser, LinkLabel, ParseStackElemData, ParseStackElemRef,
 };
@@ -101,7 +101,8 @@ impl InlineParser for LinkParser {
                     .stop(),
                 segment.start(),
             );
-            let maybe_link_ref = ssegment.str(reader.source());
+            let maybe_link_ref_value = block_to_value(reader.between(ssegment), reader.source());
+            let maybe_link_ref = maybe_link_ref_value.str(reader.source());
             if maybe_link_ref.len() > 999 {
                 remove_link_label(arena, last_link_label_ref, false, ctx);
                 ctx.link_bottoms_mut().remove_top(arena);
@@ -117,8 +118,17 @@ impl InlineParser for LinkParser {
             };
             let ref_def = as_kind_data!(arena, link_ref, LinkReferenceDefinition);
             link_opt = Some(match ref_def.title() {
-                Some(t) => Link::with_title(ref_def.destination(), t),
-                None => Link::new(ref_def.destination()),
+                Some(t) => Link::reference_with_title(
+                    ref_def.destination(),
+                    maybe_link_ref_value,
+                    LinkReferenceKind::Shortcut,
+                    t,
+                ),
+                None => Link::reference(
+                    ref_def.destination(),
+                    maybe_link_ref_value,
+                    LinkReferenceKind::Shortcut,
+                ),
             });
         }
         let link = link_opt.expect("should parsed");
@@ -199,13 +209,20 @@ fn parse_reference_link(
     let segs = reader.between_current(l, pos);
     reader.advance(1); // skip ']'
     let mut maybe_link_ref = block_to_bytes(segs, reader.source());
+    let mut kind = LinkReferenceKind::Full;
+    let link_ref_value: text::Value;
     if is_blank(&maybe_link_ref) {
         // collapsed reference link
-        maybe_link_ref = Segment::new(
+        let seg: text::Segment = (
             ctx.link_labels().get_elem(last_ref)?.index(arena).stop(),
             start_pos.start() - 1,
         )
-        .bytes(reader.source());
+            .into();
+        link_ref_value = block_to_value(reader.between(seg), reader.source());
+        maybe_link_ref = block_to_bytes(reader.between(seg), reader.source());
+        kind = LinkReferenceKind::Collapsed;
+    } else {
+        link_ref_value = maybe_link_ref.clone().into();
     }
     // CommonMark spec says:
     //  > A link label can have at most 999 characters inside the square brackets.
@@ -214,12 +231,13 @@ fn parse_reference_link(
     }
 
     let maybe_link_ref = to_link_reference(maybe_link_ref);
-    let link_ref = ctx.link_reference(String::from_utf8_lossy(&maybe_link_ref).as_ref())?;
+    let link_ref =
+        ctx.link_reference(unsafe { core::str::from_utf8_unchecked(&maybe_link_ref) })?;
     let ref_def = as_kind_data!(arena, link_ref, LinkReferenceDefinition);
 
     Some(match ref_def.title() {
-        Some(t) => Link::with_title(ref_def.destination(), t),
-        None => Link::new(ref_def.destination()),
+        Some(t) => Link::reference_with_title(ref_def.destination(), link_ref_value, kind, t),
+        None => Link::reference(ref_def.destination(), link_ref_value, kind),
     })
 }
 
@@ -271,8 +289,8 @@ fn parse_link(reader: &mut text::BlockReader) -> Option<Link> {
     }
     let destination = destination.unwrap_or_else(|| "".into());
     Some(match title {
-        Some(t) => Link::with_title(destination, t),
-        None => Link::new(destination),
+        Some(t) => Link::inline_with_title(destination, t),
+        None => Link::inline(destination),
     })
 }
 
