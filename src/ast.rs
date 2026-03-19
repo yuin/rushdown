@@ -2858,10 +2858,44 @@ pub struct LinkReference {
     reference_kind: LinkReferenceKind,
 }
 
+impl LinkReference {
+    /// Returns the string representation of the reference value of this link reference.
+    #[inline(always)]
+    pub fn value_str<'a>(&'a self, source: &'a str) -> &'a str {
+        self.value.str(source)
+    }
+
+    /// Returns the reference value of this link reference.
+    #[inline(always)]
+    pub fn value(&self) -> &text::Value {
+        &self.value
+    }
+
+    /// Returns the kind of this link reference.
+    #[inline(always)]
+    pub fn reference_kind(&self) -> LinkReferenceKind {
+        self.reference_kind
+    }
+}
+
 /// Represents an auto link in the document.
 #[derive(Debug)]
 pub struct AutoLink {
     text: text::Value,
+}
+
+impl AutoLink {
+    /// Returns the string representation of the auto link text of this auto link.
+    #[inline(always)]
+    pub fn text_str<'a>(&'a self, source: &'a str) -> &'a str {
+        self.text.str(source)
+    }
+
+    /// Returns the auto link text of this auto link.
+    #[inline(always)]
+    pub fn text(&self) -> &text::Value {
+        &self.text
+    }
 }
 
 /// Represents a link in the document.
