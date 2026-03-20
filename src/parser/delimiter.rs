@@ -27,17 +27,17 @@ pub fn parse_delimiter<'a>(
     ctx: &mut Context,
 ) -> Option<NodeRef> {
     let (line, segment) = reader.peek_line_bytes()?;
-    let precending = reader.precending_charater();
 
     let c = line[0];
     let mut j = 0;
-    if !processor.is_delimiter(c) {
+    if segment.padding() != 0 || !processor.is_delimiter(c) {
         return None;
     }
     while j < line.len() && c == line[j] {
         j += 1;
     }
     if j >= minimum {
+        let precending = reader.precending_charater();
         let after = char_at(&line, j).unwrap_or(' ');
         let before_is_punct = is_unicode_symbol_or_punct(precending);
         let before_is_space = is_unicode_space(precending);
@@ -150,6 +150,7 @@ pub fn process_delimiters(arena: &mut Arena, bottom: Option<ParseStackElemRef>, 
         let node_ref = (ctx.delimiters().data(opener_ref).processor().on_match)(arena, consume);
         #[cfg(feature = "inline-pos")]
         {
+            use crate::ast::Pos;
             use crate::{as_type_data, as_type_data_mut};
             let opener = ctx.delimiters().elem(opener_ref).node_ref();
             let pos = as_type_data!(arena, opener, Inline).pos();

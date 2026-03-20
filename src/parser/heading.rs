@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::cmp::min;
 
-use crate::ast::{Arena, Attributes, Heading, NodeRef};
+use crate::ast::{Arena, Attributes, Heading, HeadingKind, NodeRef};
 use crate::parser::{parse_attributes, BlockParser, Context, Options, State};
 use crate::text::{BlockReader, Reader as _, Segment, EOS};
 use crate::util::{
@@ -55,7 +55,7 @@ impl BlockParser for AtxHeadingParser {
 
         // alone '#' (without a new line character)
         if i == line.len() {
-            let heading_ref = arena.new_node(Heading::new(level as u8));
+            let heading_ref = arena.new_node(Heading::new(HeadingKind::Atx, level as u8));
             return Some((heading_ref, State::NO_CHILDREN));
         }
 
@@ -66,7 +66,7 @@ impl BlockParser for AtxHeadingParser {
         }
 
         let start = min(i + l, line.len() - 1);
-        let heading_ref = arena.new_node(Heading::new(level as u8));
+        let heading_ref = arena.new_node(Heading::new(HeadingKind::Atx, level as u8));
         let mut hl = Segment::new(
             segment.start() + start - segment.padding(),
             segment.start() + line.len() - segment.padding(),
@@ -180,7 +180,7 @@ impl BlockParser for SetextHeadingParser {
         let (line, segment) = reader.peek_line_bytes()?;
         let c = matches_setext_heading_bar(&line)?;
         let level = if c == b'=' { 1 } else { 2 };
-        let node_ref = arena.new_node(Heading::new(level));
+        let node_ref = arena.new_node(Heading::new(HeadingKind::Setext, level));
         as_type_data_mut!(arena, node_ref, Block).append_source_line(segment);
         ctx.insert(self.temporary_paragraph, last_ref);
         Some((node_ref, State::REQUIRE_PARAGRAPH | State::NO_CHILDREN))

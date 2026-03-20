@@ -109,6 +109,7 @@ use core::result::Result as CoreResult;
 
 use crate::error::*;
 use crate::text;
+use crate::text::ValuesExt;
 use crate::util::StringMap;
 
 use bitflags::bitflags;
@@ -644,7 +645,7 @@ impl Arena {
     pub fn with_options(options: ArenaOptions) -> Self {
         let mut s = Self {
             arena: Vec::with_capacity(options.initial_size),
-            free_indicies: Vec::new(),
+            free_indicies: Vec::with_capacity(options.initial_size / 16),
             id_seq: 0,
             doc: None,
         };
@@ -979,6 +980,12 @@ impl From<NodeType> for TypeData {
     }
 }
 
+/// A trait for nodes that have a position in the source text.
+pub trait Pos {
+    /// Returns the position of this node in the source text.
+    fn pos(&self) -> usize;
+}
+
 /// A Data associated with its [`NodeType`].
 #[derive(Debug)]
 #[non_exhaustive]
@@ -1054,16 +1061,6 @@ impl Block {
         }
     }
 
-    /// Unshifts a source line to this block.
-    #[inline(always)]
-    pub fn unshift_source_line(&mut self, line: text::Segment) {
-        if let Some(source) = &mut self.source {
-            source.insert(0, line);
-        } else {
-            self.source = Some(vec![line]);
-        }
-    }
-
     /// Appends source lines to this block.
     #[inline(always)]
     pub fn append_source_lines(&mut self, lines: &text::Block) {
@@ -1105,9 +1102,11 @@ impl Block {
     pub fn set_blank_previous_line(&mut self, value: bool) {
         self.has_blank_previous_line = value;
     }
+}
 
-    /// Returns the position of this block in the source text.
-    pub fn pos(&self) -> usize {
+impl Pos for Block {
+    #[inline(always)]
+    fn pos(&self) -> usize {
         self.source
             .as_ref()
             .and_then(|s| s.first())
@@ -1138,13 +1137,6 @@ impl Inline {
         }
     }
 
-    /// Returns the position of this inline node in the source text.
-    #[cfg(feature = "inline-pos")]
-    #[inline(always)]
-    pub fn pos(&self) -> usize {
-        self.pos.unwrap_or(0)
-    }
-
     /// Sets the position of this inline node in the source text.
     #[cfg(feature = "inline-pos")]
     #[inline(always)]
@@ -1155,6 +1147,14 @@ impl Inline {
     #[cfg(feature = "inline-pos")]
     pub(crate) fn has_pos(&self) -> bool {
         self.pos.is_some()
+    }
+}
+
+#[cfg(feature = "inline-pos")]
+impl Pos for Inline {
+    #[inline(always)]
+    fn pos(&self) -> usize {
+        self.pos.unwrap_or(0)
     }
 }
 
@@ -1735,22 +1735,41 @@ impl From<Paragraph> for KindData {
 
 //   Heading {{{
 
+/// Kinds of headings.
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
+#[non_exhaustive]
+pub enum HeadingKind {
+    #[default]
+    Atx,
+    Setext,
+}
+
 /// Represents a heading node.
 #[derive(Debug, Default)]
 pub struct Heading {
+    heading_kind: HeadingKind,
     level: u8,
 }
 
 impl Heading {
     /// Creates a new [`Heading`] with the given level.
-    pub fn new(level: u8) -> Self {
-        Self { level }
+    pub fn new(heading_kind: HeadingKind, level: u8) -> Self {
+        Self {
+            heading_kind,
+            level,
+        }
     }
 
     /// Returns the level of the heading.
     #[inline(always)]
     pub fn level(&self) -> u8 {
         self.level
+    }
+
+    /// Returns the kind of the heading.
+    #[inline(always)]
+    pub fn heading_kind(&self) -> HeadingKind {
+        self.heading_kind
     }
 }
 
@@ -1843,9 +1862,9 @@ pub struct CodeBlock {
 
 impl CodeBlock {
     /// Creates a new [`CodeBlock`] node.
-    pub fn new(typ: CodeBlockKind, info: Option<text::Value>) -> Self {
+    pub fn new(code_block_kind: CodeBlockKind, info: Option<text::Value>) -> Self {
         Self {
-            code_block_kind: typ,
+            code_block_kind,
             info,
             fdata: None,
             value: BlockText::Source,
@@ -2307,14 +2326,14 @@ impl From<HtmlBlock> for KindData {
 /// Represents a link reference definition node.
 #[derive(Debug)]
 pub struct LinkReferenceDefinition {
-    label: text::Value,
+    label: text::Values,
     destination: text::Value,
-    title: Option<text::Value>,
+    title: Option<text::Values>,
 }
 
 impl LinkReferenceDefinition {
     /// Creates a new [`LinkReferenceDefinition`] node.
-    pub fn new(label: impl Into<text::Value>, destination: impl Into<text::Value>) -> Self {
+    pub fn new(label: impl Into<text::Values>, destination: impl Into<text::Value>) -> Self {
         Self {
             label: label.into(),
             destination: destination.into(),
@@ -2324,9 +2343,9 @@ impl LinkReferenceDefinition {
 
     /// Creates a new [`LinkReferenceDefinition`] node with a title.
     pub fn with_title(
-        label: impl Into<text::Value>,
+        label: impl Into<text::Values>,
         destination: impl Into<text::Value>,
-        title: impl Into<text::Value>,
+        title: impl Into<text::Values>,
     ) -> Self {
         Self {
             label: label.into(),
@@ -2337,13 +2356,13 @@ impl LinkReferenceDefinition {
 
     /// Returns the label of the link reference definition.
     #[inline(always)]
-    pub fn label(&self) -> &text::Value {
+    pub fn label(&self) -> &text::Values {
         &self.label
     }
 
     /// Returns the string representation of the label of the link reference definition.
     #[inline(always)]
-    pub fn label_str<'a>(&'a self, source: &'a str) -> &'a str {
+    pub fn label_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
         self.label.str(source)
     }
 
@@ -2361,13 +2380,13 @@ impl LinkReferenceDefinition {
 
     /// Returns the title of the link reference definition.
     #[inline(always)]
-    pub fn title(&self) -> Option<&text::Value> {
+    pub fn title(&self) -> Option<&text::Values> {
         self.title.as_ref()
     }
 
     /// Returns the string representation of the title of the link reference definition.
     #[inline(always)]
-    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<&'a str> {
+    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<Cow<'a, str>> {
         self.title.as_ref().map(|t| t.str(source))
     }
 }
@@ -2399,10 +2418,7 @@ impl PrettyPrint for LinkReferenceDefinition {
             w,
             "{}Title: {}",
             pp_indent(level),
-            match &self.title {
-                Some(title) => title.str(source),
-                None => "<None>",
-            }
+            self.title_str(source).as_deref().unwrap_or("<None>")
         )
     }
 }
@@ -2632,6 +2648,7 @@ impl From<TableCell> for KindData {
 // }}} Blocks
 
 // Inlines {{{
+
 //   Text {{{
 
 bitflags! {
@@ -2854,27 +2871,27 @@ pub enum LinkReferenceKind {
 /// Represents a link reference in the document.
 #[derive(Debug)]
 pub struct LinkReference {
-    value: text::Value,
-    reference_kind: LinkReferenceKind,
+    value: text::Values,
+    link_reference_kind: LinkReferenceKind,
 }
 
 impl LinkReference {
     /// Returns the string representation of the reference value of this link reference.
     #[inline(always)]
-    pub fn value_str<'a>(&'a self, source: &'a str) -> &'a str {
+    pub fn value_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
         self.value.str(source)
     }
 
     /// Returns the reference value of this link reference.
     #[inline(always)]
-    pub fn value(&self) -> &text::Value {
+    pub fn value(&self) -> &text::Values {
         &self.value
     }
 
     /// Returns the kind of this link reference.
     #[inline(always)]
-    pub fn reference_kind(&self) -> LinkReferenceKind {
-        self.reference_kind
+    pub fn link_reference_kind(&self) -> LinkReferenceKind {
+        self.link_reference_kind
     }
 }
 
@@ -2903,7 +2920,7 @@ impl AutoLink {
 pub struct Link {
     destination: text::Value,
 
-    title: Option<text::Value>,
+    title: Option<text::Values>,
 
     link_kind: LinkKind,
 }
@@ -2921,7 +2938,7 @@ impl Link {
     /// Creates a new inline link with the given destination and title.
     pub fn inline_with_title(
         destination: impl Into<text::Value>,
-        title: impl Into<text::Value>,
+        title: impl Into<text::Values>,
     ) -> Self {
         Self {
             destination: destination.into(),
@@ -2933,7 +2950,7 @@ impl Link {
     /// Creates a new reference link with the given destination and reference value.
     pub fn reference(
         destination: impl Into<text::Value>,
-        value: impl Into<text::Value>,
+        value: impl Into<text::Values>,
         reference_kind: LinkReferenceKind,
     ) -> Self {
         Self {
@@ -2941,7 +2958,7 @@ impl Link {
             title: None,
             link_kind: LinkKind::Reference(LinkReference {
                 value: value.into(),
-                reference_kind,
+                link_reference_kind: reference_kind,
             }),
         }
     }
@@ -2949,16 +2966,16 @@ impl Link {
     /// Creates a new reference link with the given destination, reference value and title.
     pub fn reference_with_title(
         destination: impl Into<text::Value>,
-        value: impl Into<text::Value>,
+        value: impl Into<text::Values>,
         reference_kind: LinkReferenceKind,
-        title: impl Into<text::Value>,
+        title: impl Into<text::Values>,
     ) -> Self {
         Self {
             destination: destination.into(),
             title: Some(title.into()),
             link_kind: LinkKind::Reference(LinkReference {
                 value: value.into(),
-                reference_kind,
+                link_reference_kind: reference_kind,
             }),
         }
     }
@@ -2986,13 +3003,13 @@ impl Link {
 
     /// Returns the title of the link, if it exists.
     #[inline(always)]
-    pub fn title(&self) -> Option<&text::Value> {
+    pub fn title(&self) -> Option<&text::Values> {
         self.title.as_ref()
     }
 
     /// Returns the string representation of the title of the link, if it exists.
     #[inline(always)]
-    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<&'a str> {
+    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<Cow<'a, str>> {
         self.title.as_ref().map(|t| t.str(source))
     }
 
@@ -3029,7 +3046,7 @@ impl PrettyPrint for Link {
                     w,
                     "{}ReferenceKind: {:?}",
                     pp_indent(level),
-                    reference.reference_kind
+                    reference.link_reference_kind
                 )?;
             }
             LinkKind::Auto(auto) => {
@@ -3070,7 +3087,7 @@ impl From<Link> for KindData {
 pub struct Image {
     destination: text::Value,
 
-    title: Option<text::Value>,
+    title: Option<text::Values>,
 }
 
 impl Image {
@@ -3083,7 +3100,7 @@ impl Image {
     }
 
     /// Creates a new Image with the given destination and title.
-    pub fn with_title(destination: impl Into<text::Value>, title: impl Into<text::Value>) -> Self {
+    pub fn with_title(destination: impl Into<text::Value>, title: impl Into<text::Values>) -> Self {
         Self {
             destination: destination.into(),
             title: Some(title.into()),
@@ -3104,13 +3121,13 @@ impl Image {
 
     /// Returns the title of the link, if it exists.
     #[inline(always)]
-    pub fn title(&self) -> Option<&text::Value> {
+    pub fn title(&self) -> Option<&text::Values> {
         self.title.as_ref()
     }
 
     /// Returns the string representation of the title of the link, if it exists.
     #[inline(always)]
-    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<&'a str> {
+    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<Cow<'a, str>> {
         self.title.as_ref().map(|t| t.str(source))
     }
 }
@@ -3151,52 +3168,31 @@ impl From<Image> for KindData {
 //   RawHtml {{{
 
 /// Represents an inline raw HTML node.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RawHtml {
-    values: Vec<text::Value>,
+    value: text::Values,
 }
 
 impl RawHtml {
     /// Creates a new RawHtml
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(value: text::Values) -> Self {
+        Self { value }
     }
 
-    /// Adds a value to the raw HTML.
+    /// Returns the value of this raw HTML.
     #[inline(always)]
-    pub fn add_value(&mut self, value: text::Value) {
-        self.values.push(value);
+    pub fn value(&self) -> &text::Values {
+        &self.value
     }
 
     /// Returns the string representation of this raw HTML.
     pub fn str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        if self.values.len() == 1 {
-            if let text::Value::Index(ref index) = self.values[0] {
-                return Cow::Borrowed(index.str(source));
-            }
-        }
-        Cow::Owned(
-            self.values
-                .iter()
-                .map(|v| v.str(source))
-                .collect::<String>(),
-        )
+        self.value.str(source)
     }
 
     /// Returns the bytes of this raw HTML.
     pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
-        if self.values.len() == 1 {
-            if let text::Value::Index(ref index) = self.values[0] {
-                return Cow::Borrowed(index.bytes(source));
-            }
-        }
-        Cow::Owned(
-            self.values
-                .iter()
-                .flat_map(|v| v.bytes(source))
-                .copied()
-                .collect::<Vec<u8>>(),
-        )
+        self.value.bytes(source)
     }
 }
 

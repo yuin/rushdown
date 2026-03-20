@@ -2,9 +2,11 @@
 
 extern crate alloc;
 
+use core::ops::Range;
+
 use memchr::memchr;
 
-use crate::util::{self, is_blank, is_space, utf8_len};
+use crate::util::{self, is_blank, is_space, trim_left_space, utf8_len, TinyVec};
 use alloc::borrow::Cow;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -16,6 +18,8 @@ use crate::println;
 const SPACE: &[u8] = b" ";
 
 // Value {{{
+
+//   Value {{{
 
 /// An enum represents a string value that can be either an [`Index`] or a [`String`].
 /// [`Value`] does not handle padding and new lines.
@@ -125,6 +129,7 @@ impl From<Segment> for Value {
         Value::Index(Index::new(segment.start(), segment.stop()))
     }
 }
+//   }}} Value
 
 //   Index {{{
 
@@ -156,7 +161,7 @@ impl Index {
 
     /// Returns the bytes of the index from the source.
     #[inline(always)]
-    pub fn bytes<'a>(&'a self, source: &'a str) -> &'a [u8] {
+    pub fn bytes<'a>(&self, source: &'a str) -> &'a [u8] {
         &source.as_bytes()[self.start..self.stop]
     }
 
@@ -165,7 +170,7 @@ impl Index {
     /// # Safety
     /// This method does not check the validity of UTF-8 boundaries.
     #[inline(always)]
-    pub fn str<'a>(&'a self, source: &'a str) -> &'a str {
+    pub fn str<'a>(&self, source: &'a str) -> &'a str {
         unsafe { source.get_unchecked(self.start..self.stop) }
     }
 
@@ -214,6 +219,109 @@ impl From<Segment> for Index {
 
 //   }}} Index
 
+//   Values {{{
+
+/// Collection of values.
+/// Most values are expected to be a single value, so [`TinyVec`] is used for the collection.
+/// In CommonMark, some values can be represented by multiple lines, so the collection is used to
+/// represent such values(e.g. link label).
+pub type Values = TinyVec<Value>;
+
+/// Extension trait for [`Values`].
+pub trait ValuesExt {
+    /// Returns a str value by concatenating all values in the collection.
+    /// If the collection has two or more values, the first value is concatenated without trimming
+    /// leading spaces, and the second and subsequent values are concatenated after trimming
+    /// leading spaces.
+    fn str<'a>(&'a self, source: &'a str) -> Cow<'a, str>;
+
+    /// Returns a byte slice value by concatenating all values in the collection.
+    /// If the collection has two or more values, the first value is concatenated without trimming
+    /// leading spaces, and the second and subsequent values are concatenated after trimming
+    /// leading spaces.
+    fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]>;
+}
+
+impl ValuesExt for Values {
+    fn str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
+        let first = self.get(0);
+        let second = self.get(1);
+        if let Some(f) = first {
+            if second.is_none() {
+                return Cow::Borrowed(f.str(source));
+            }
+        } else {
+            return Cow::Borrowed("");
+        }
+        let mut result = String::new();
+        result.push_str(first.unwrap().str(source));
+        let b = second.unwrap().bytes(source);
+        result.push_str(unsafe { core::str::from_utf8_unchecked(trim_left_space(b)) });
+        for v in self.iter().skip(2) {
+            let b = v.bytes(source);
+            result.push_str(unsafe { core::str::from_utf8_unchecked(trim_left_space(b)) });
+        }
+        Cow::Owned(result)
+    }
+
+    fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
+        let first = self.get(0);
+        let second = self.get(1);
+        if let Some(f) = first {
+            if second.is_none() {
+                return Cow::Borrowed(f.bytes(source));
+            }
+        } else {
+            return Cow::Borrowed(&[]);
+        }
+        let mut result = Vec::new();
+        result.extend_from_slice(first.unwrap().bytes(source));
+        result.extend_from_slice(trim_left_space(second.unwrap().bytes(source)));
+        for v in self.iter().skip(2) {
+            result.extend_from_slice(trim_left_space(v.bytes(source)));
+        }
+        Cow::Owned(result)
+    }
+}
+
+impl From<String> for Values {
+    fn from(s: String) -> Self {
+        Values::from_single(s.into())
+    }
+}
+
+impl From<&str> for Values {
+    fn from(s: &str) -> Self {
+        Values::from_single(s.into())
+    }
+}
+
+impl From<Vec<u8>> for Values {
+    fn from(s: Vec<u8>) -> Self {
+        Values::from_single(String::from_utf8_lossy(&s).into_owned().into())
+    }
+}
+
+impl From<&[u8]> for Values {
+    fn from(s: &[u8]) -> Self {
+        Values::from_single(String::from_utf8_lossy(s).into_owned().into())
+    }
+}
+
+impl From<Cow<'_, str>> for Values {
+    fn from(s: Cow<'_, str>) -> Self {
+        Values::from_single(s.into_owned().into())
+    }
+}
+
+impl From<Cow<'_, [u8]>> for Values {
+    fn from(s: Cow<'_, [u8]>) -> Self {
+        Values::from_single(String::from_utf8_lossy(&s).into_owned().into())
+    }
+}
+
+//   }}} Values
+
 // }}} Value
 
 // Segment {{{
@@ -240,70 +348,93 @@ fn binary_search_block_pos(block: &Block, pos: usize) -> Option<usize> {
     None
 }
 
-/// Converts a [`Block`] to a Value.
-pub fn block_to_value(i: impl IntoIterator<Item = Segment>, source: &str) -> Value {
-    let mut b = i.into_iter();
-    let first = b.next();
-    let second = b.next();
-    if let Some(f) = first {
-        if second.is_none() {
-            return f.into();
-        }
-    } else {
-        return Value::String(String::new());
-    }
-    let mut result = String::new();
-    result.push_str(&first.unwrap().str(source));
-    result.push_str(&second.unwrap().str(source));
+/// Extension trait for [`Block`].
+pub trait BlockExt {
+    /// Returns a collection of values by converting each segment in the block to a value.
+    fn to_values(&self) -> Values;
 
-    for segment in b {
-        result.push_str(&segment.str(source));
-    }
-    Value::String(result)
+    /// Returns a str value by concatenating all segments in the block.
+    fn str<'a>(&self, source: &'a str) -> Cow<'a, str>;
+
+    /// Returns a byte slice value by concatenating all segments in the block.
+    fn bytes<'a>(&self, source: &'a str) -> Cow<'a, [u8]>;
 }
 
-/// Converts a [`Block`] to a bytes.
-pub fn block_to_bytes<'a>(i: impl IntoIterator<Item = Segment>, source: &'a str) -> Cow<'a, [u8]> {
-    let mut b = i.into_iter();
-    let first = b.next();
-    let second = b.next();
-    if let Some(f) = first {
-        if second.is_none() {
-            return f.bytes(source);
+impl BlockExt for Block {
+    fn to_values(&self) -> Values {
+        let first = self.first();
+        let second = self.get(1);
+        if let Some(f) = first {
+            if second.is_none() {
+                return Values::from_single((f.start(), f.stop()).into());
+            }
+        } else {
+            return Values::default();
         }
-    } else {
-        return Cow::Borrowed(&[]);
+        let mut result = Values::default();
+        for v in self.iter() {
+            result.push((v.start(), v.stop()).into());
+        }
+        result
     }
-    let mut result = Vec::new();
-    result.extend_from_slice(&first.unwrap().bytes(source));
-    result.extend_from_slice(&second.unwrap().bytes(source));
 
-    for segment in b {
-        result.extend_from_slice(&segment.bytes(source));
+    fn str<'a>(&self, source: &'a str) -> Cow<'a, str> {
+        let first = self.first();
+        let second = self.get(1);
+        if let Some(f) = first {
+            if second.is_none() {
+                return f.str(source);
+            }
+        } else {
+            return Cow::Borrowed("");
+        }
+        let mut result = String::new();
+        result.push_str(&first.unwrap().str(source));
+        result.push_str(&second.unwrap().str(source));
+        for v in self.iter().skip(2) {
+            result.push_str(&v.str(source));
+        }
+        Cow::Owned(result)
     }
-    Cow::Owned(result)
+
+    fn bytes<'a>(&self, source: &'a str) -> Cow<'a, [u8]> {
+        let first = self.first();
+        let second = self.get(1);
+        if let Some(f) = first {
+            if second.is_none() {
+                return f.bytes(source);
+            }
+        } else {
+            return Cow::Borrowed(&[]);
+        }
+        let mut result = Vec::new();
+        result.extend_from_slice(&first.unwrap().bytes(source));
+        result.extend_from_slice(&second.unwrap().bytes(source));
+        for v in self.iter().skip(2) {
+            result.extend_from_slice(&v.bytes(source));
+        }
+        Cow::Owned(result)
+    }
 }
 
-/// Converts a [`Block`] to a str.
-pub fn block_to_str<'a>(i: impl IntoIterator<Item = Segment>, source: &'a str) -> Cow<'a, str> {
+pub(crate) fn block_to_values(i: impl IntoIterator<Item = Segment>) -> Values {
     let mut b = i.into_iter();
     let first = b.next();
     let second = b.next();
     if let Some(f) = first {
         if second.is_none() {
-            return f.str(source);
+            return Values::from_single(f.into());
         }
     } else {
-        return Cow::Borrowed("");
+        return Values::default();
     }
-    let mut result = String::new();
-    result.push_str(&first.unwrap().str(source));
-    result.push_str(&second.unwrap().str(source));
-
+    let mut result = Values::default();
+    result.push(first.unwrap().into());
+    result.push(second.unwrap().into());
     for segment in b {
-        result.push_str(&segment.str(source));
+        result.push(segment.into());
     }
-    Cow::Owned(result)
+    result
 }
 
 /// A Segment struct repsents a segment of CommonMark text.
@@ -326,6 +457,16 @@ impl Segment {
             start,
             stop,
             padding: 0,
+            force_newline: false,
+        }
+    }
+
+    /// Create a Segment with start, stop, and padding.
+    pub fn new_with_padding(start: usize, stop: usize, padding: usize) -> Self {
+        Segment {
+            start,
+            stop,
+            padding: padding as u8,
             force_newline: false,
         }
     }
@@ -355,16 +496,6 @@ impl Segment {
     #[inline(always)]
     pub fn force_newline(&self) -> bool {
         self.force_newline
-    }
-
-    /// Create a Segment with start, stop, and padding.
-    pub fn new_with_padding(start: usize, stop: usize, padding: usize) -> Self {
-        Segment {
-            start,
-            stop,
-            padding: padding as u8,
-            force_newline: false,
-        }
     }
 
     /// Returns the bytes of the segment from the source.
@@ -513,6 +644,12 @@ impl Segment {
             force_newline: v,
         }
     }
+
+    /// Returns an Index with same start and stop as this segment.
+    #[inline(always)]
+    pub fn to_index(&self) -> Index {
+        Index::new(self.start, self.stop)
+    }
 }
 
 impl From<(usize, usize)> for Segment {
@@ -530,6 +667,12 @@ impl From<(usize, usize, usize)> for Segment {
 impl From<Index> for Segment {
     fn from(index: Index) -> Self {
         Segment::new(index.start(), index.stop())
+    }
+}
+
+impl From<Segment> for Range<usize> {
+    fn from(segment: Segment) -> Self {
+        segment.start()..segment.stop()
     }
 }
 
@@ -560,6 +703,10 @@ pub trait Reader<'a> {
     /// Reads the next byte without advancing the position.
     /// Returns [`EOS`] if the end of the source is reached.
     fn peek_byte(&self) -> u8;
+
+    /// Reads the next line segment without advancing the position.
+    /// Returns None if the end of the source is reached.
+    fn peek_line_segment(&self) -> Option<Segment>;
 
     /// Reads the next line without advancing the position.
     /// Returns None if the end of the source is reached.
@@ -712,6 +859,16 @@ impl<'a> Reader<'a> for BasicReader<'a> {
             return self.bsource[self.pos.start()];
         }
         EOS
+    }
+
+    fn peek_line_segment(&self) -> Option<Segment> {
+        if self.source_length == 0 {
+            return None;
+        }
+        if self.pos.start() < self.source_length {
+            return Some(self.pos);
+        }
+        None
     }
 
     fn peek_line_bytes(&self) -> Option<(Cow<'a, [u8]>, Segment)> {
@@ -905,22 +1062,18 @@ impl<'a> BlockReader<'a> {
         self.reset_position();
     }
 
-    /// Returns an iterator that yields segments between the current position and the given
+    /// Returns Values that contains value between the current position and the given
     /// position.
-    pub fn between_current(
-        &mut self,
-        line: usize,
-        pos: Segment,
-    ) -> impl Iterator<Item = Segment> + 'a {
+    pub fn between_current(&mut self, line: usize, pos: Segment) -> Values {
         if line == self.line.unwrap_or(0) {
             let seg = self.block[line];
             if pos.start() >= seg.start() && self.pos.start() <= seg.stop() {
-                return BetweenBlockIterator::single(
-                    (pos.start(), self.pos.start(), pos.padding()).into(),
-                );
+                return block_to_values(BetweenBlockIterator::single(
+                    pos.start()..self.pos.start(),
+                ));
             }
         }
-        BetweenBlockIterator::multi(
+        block_to_values(BetweenBlockIterator::multi(
             BlockReader {
                 source: self.source,
                 bsource: self.bsource,
@@ -933,23 +1086,23 @@ impl<'a> BlockReader<'a> {
             },
             line,
             pos,
-        )
+        ))
     }
 
-    /// Returns an iterator that yields segments between the given range.
-    pub fn between(&self, range: Segment) -> impl Iterator<Item = Segment> + 'a {
-        let from_line = binary_search_block_pos(self.block, range.start()).unwrap_or(0);
+    /// Returns Values that contains segments between the given range.
+    pub fn between(&self, range: Range<usize>) -> Values {
+        let from_line = binary_search_block_pos(self.block, range.start).unwrap_or(0);
         let mut from_pos = self.block[from_line];
-        if range.start() >= from_pos.start() && range.stop() <= from_pos.stop() {
-            return BetweenBlockIterator::single(range);
+        if range.start >= from_pos.start() && range.end <= from_pos.stop() {
+            return block_to_values(BetweenBlockIterator::single(range));
         }
         let to_line =
-            binary_search_block_pos(self.block, range.stop()).unwrap_or(self.block.len() - 1);
+            binary_search_block_pos(self.block, range.end).unwrap_or(self.block.len() - 1);
         let mut to_pos = self.block[to_line];
-        to_pos.start = range.stop();
-        from_pos.start = range.start();
+        to_pos.start = range.end;
+        from_pos.start = range.start;
 
-        BetweenBlockIterator::multi(
+        block_to_values(BetweenBlockIterator::multi(
             BlockReader {
                 source: self.source,
                 bsource: self.bsource,
@@ -962,7 +1115,7 @@ impl<'a> BlockReader<'a> {
             },
             from_line,
             from_pos,
-        )
+        ))
     }
 }
 
@@ -976,7 +1129,7 @@ struct MultilineBetweenBlock<'a> {
 
 struct BetweenBlockIterator<'a> {
     multi: Option<MultilineBetweenBlock<'a>>,
-    single: Option<Segment>,
+    single: Option<Range<usize>>,
     done: bool,
 }
 
@@ -997,10 +1150,10 @@ impl<'a> BetweenBlockIterator<'a> {
         }
     }
 
-    fn single(segment: Segment) -> BetweenBlockIterator<'a> {
+    fn single(range: Range<usize>) -> BetweenBlockIterator<'a> {
         BetweenBlockIterator {
             multi: None,
-            single: Some(segment),
+            single: Some(range),
             done: false,
         }
     }
@@ -1013,9 +1166,9 @@ impl<'a> Iterator for BetweenBlockIterator<'a> {
         if self.done {
             return None;
         }
-        if let Some(s) = self.single {
+        if let Some(s) = &self.single {
             self.done = true;
-            return Some(s);
+            return Some((s.start, s.end).into());
         }
         if let Some(m) = &mut self.multi {
             let (ln, _) = m.reader.position();
@@ -1103,6 +1256,25 @@ impl<'a> Reader<'a> for BlockReader<'a> {
             return self.bsource[self.pos.start];
         }
         EOS
+    }
+
+    fn peek_line_segment(&self) -> Option<Segment> {
+        if self.bsource.is_empty() || self.block.is_empty() {
+            return None;
+        }
+        let l = self.line.unwrap();
+        if self.pos.is_empty() {
+            if l < self.block.len() - 1 {
+                let s = self.block[l + 1].start;
+                if s < self.bsource.len() {
+                    return Some(self.block[l + 1]);
+                }
+            }
+            return None;
+        } else if self.pos.start < self.bsource.len() {
+            return Some(self.pos);
+        }
+        None
     }
 
     fn peek_line_bytes(&self) -> Option<(Cow<'a, [u8]>, Segment)> {

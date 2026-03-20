@@ -3,7 +3,6 @@ use crate::ast::{Arena, NodeRef, Paragraph};
 use crate::parser::{BlockParser, Context, State};
 use crate::text;
 use crate::text::Reader as _;
-use crate::util::is_blank;
 
 /// [`BlockParser`] for paragraphs.
 #[derive(Debug, Default)]
@@ -28,9 +27,8 @@ impl BlockParser for ParagraphParser {
         reader: &mut text::BasicReader,
         _ctx: &mut Context,
     ) -> Option<(NodeRef, State)> {
-        let (_, segment) = reader.peek_line_bytes()?;
-        let segment = segment.trim_left_space(reader.source());
-        if segment.is_empty() {
+        let segment = reader.peek_line_segment()?;
+        if segment.is_blank(reader.source()) {
             return None;
         }
         let node_ref = arena.new_node(Paragraph::new());
@@ -47,8 +45,8 @@ impl BlockParser for ParagraphParser {
         reader: &mut text::BasicReader,
         _ctx: &mut Context,
     ) -> Option<State> {
-        let (line, segment) = reader.peek_line_bytes()?;
-        if is_blank(&line) {
+        let segment = reader.peek_line_segment()?;
+        if segment.is_blank(reader.source()) {
             return None;
         }
         let block = as_type_data_mut!(arena, node_ref, Block);

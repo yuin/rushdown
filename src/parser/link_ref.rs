@@ -6,8 +6,7 @@ use crate::ast::{Arena, LinkReferenceDefinition, NodeRef};
 use crate::parser::{
     parse_link_destination, parse_link_title, Context, ParagraphTransformer, ParseLinkTitleResult,
 };
-use crate::text::block_to_str;
-use crate::text::{self, Reader, EOS};
+use crate::text::{self, Reader, ValuesExt, EOS};
 use crate::util::indent_width;
 use crate::util::is_blank;
 use crate::{as_kind_data, as_type_data_mut};
@@ -120,9 +119,9 @@ fn parse_link_reference_definition<'a>(
         return None;
     }
 
-    let label = block_to_str(reader.between_current(l, pos), reader.source());
+    let label = reader.between_current(l, pos);
     reader.advance(1); // skip a closer
-    if is_blank(label.as_bytes()) {
+    if is_blank(&label.bytes(reader.source())) {
         return None;
     }
     if reader.peek_byte() != b':' {

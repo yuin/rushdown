@@ -11,7 +11,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::{self, Debug};
-use core::ops::Index;
+use core::ops::{DerefMut, Index, IndexMut};
 use core::{
     borrow::Borrow,
     cmp::{min, Ordering},
@@ -1636,6 +1636,307 @@ impl<'a, V> IntoIterator for &'a mut StringMap<V> {
 }
 
 // }}}
+
+// TinyVec {{{
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TinyVecKind<T> {
+    Empty,
+    Single(T),
+    Collection(Vec<T>),
+}
+
+/// A vector-like collection that can hold either a single item or a collection of items.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TinyVec<T> {
+    kind: TinyVecKind<T>,
+}
+
+impl<T> TinyVec<T> {
+    /// Creates a new TinyVec containing the given values.
+    pub fn new(values: Vec<T>) -> Self {
+        if values.len() == 1 {
+            Self::from_single(values.into_iter().next().unwrap())
+        } else {
+            Self::from_vec(values)
+        }
+    }
+
+    /// Creates a new empty TinyVec.
+    pub fn empty() -> Self {
+        Self {
+            kind: TinyVecKind::Empty,
+        }
+    }
+
+    /// Creates a new TinyVec containing a single item.
+    pub const fn from_single(value: T) -> Self {
+        Self {
+            kind: TinyVecKind::Single(value),
+        }
+    }
+
+    /// Creates a new TinyVec containing a collection of items.
+    pub fn from_vec(values: Vec<T>) -> Self {
+        Self {
+            kind: TinyVecKind::Collection(values),
+        }
+    }
+
+    /// Returns the number of items in the TinyVec.
+    pub fn len(&self) -> usize {
+        match &self.kind {
+            TinyVecKind::Empty => 0,
+            TinyVecKind::Single(_) => 1,
+            TinyVecKind::Collection(v) => v.len(),
+        }
+    }
+
+    /// Returns true if the TinyVec contains no items.
+    pub fn is_empty(&self) -> bool {
+        match &self.kind {
+            TinyVecKind::Empty => true,
+            TinyVecKind::Single(_) => false,
+            TinyVecKind::Collection(v) => v.is_empty(),
+        }
+    }
+
+    /// Returns a slice of the items in the TinyVec.
+    pub fn as_slice(&self) -> &[T] {
+        match &self.kind {
+            TinyVecKind::Empty => &[],
+            TinyVecKind::Single(v) => core::slice::from_ref(v),
+            TinyVecKind::Collection(vs) => vs.as_slice(),
+        }
+    }
+
+    /// Returns a mutable slice of the items in the TinyVec.
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        match &mut self.kind {
+            TinyVecKind::Empty => &mut [],
+            TinyVecKind::Single(v) => core::slice::from_mut(v),
+            TinyVecKind::Collection(vs) => vs.as_mut_slice(),
+        }
+    }
+
+    /// Returns a reference to the item at the specified index, or None if the index is out of
+    /// bounds.
+    pub fn get(&self, index: usize) -> Option<&T> {
+        match &self.kind {
+            TinyVecKind::Empty => None,
+            TinyVecKind::Single(v) => {
+                if index == 0 {
+                    Some(v)
+                } else {
+                    None
+                }
+            }
+            TinyVecKind::Collection(vs) => vs.get(index),
+        }
+    }
+
+    /// Returns a mutable reference to the item at the specified index, or None if the index is out
+    /// of bounds.
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        match &mut self.kind {
+            TinyVecKind::Empty => None,
+            TinyVecKind::Single(v) => {
+                if index == 0 {
+                    Some(v)
+                } else {
+                    None
+                }
+            }
+            TinyVecKind::Collection(vs) => vs.get_mut(index),
+        }
+    }
+
+    /// Appends an item to the end of the TinyVec.
+    pub fn push(&mut self, value: T) {
+        match &mut self.kind {
+            TinyVecKind::Empty => {
+                self.kind = TinyVecKind::Single(value);
+            }
+            TinyVecKind::Single(_) => {
+                let old = core::mem::replace(&mut self.kind, TinyVecKind::Collection(Vec::new()));
+                match old {
+                    TinyVecKind::Empty => unreachable!(),
+                    TinyVecKind::Single(v0) => {
+                        self.kind = TinyVecKind::Collection(alloc::vec![v0, value]);
+                    }
+                    TinyVecKind::Collection(_) => unreachable!(),
+                }
+            }
+            TinyVecKind::Collection(vs) => vs.push(value),
+        }
+    }
+
+    /// Removes and returns the item at the specified index, shifting all items after it to the
+    /// left.
+    pub fn remove(&mut self, index: usize) -> T {
+        match &mut self.kind {
+            TinyVecKind::Empty => panic!("index out of bounds"),
+            TinyVecKind::Single(_) => {
+                if index == 0 {
+                    let old =
+                        core::mem::replace(&mut self.kind, TinyVecKind::Collection(Vec::new()));
+                    match old {
+                        TinyVecKind::Empty => unreachable!(),
+                        TinyVecKind::Single(v) => v,
+                        TinyVecKind::Collection(_) => unreachable!(),
+                    }
+                } else {
+                    panic!("index out of bounds");
+                }
+            }
+            TinyVecKind::Collection(vs) => vs.remove(index),
+        }
+    }
+
+    /// Converts the TinyVec into a Vec<T>.
+    pub fn into_vec(self) -> Vec<T> {
+        match self.kind {
+            TinyVecKind::Empty => Vec::new(),
+            TinyVecKind::Single(v) => alloc::vec![v],
+            TinyVecKind::Collection(vs) => vs,
+        }
+    }
+}
+
+impl<T> Default for TinyVec<T> {
+    fn default() -> Self {
+        Self {
+            kind: TinyVecKind::Empty,
+        }
+    }
+}
+
+impl<T> Deref for TinyVec<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl<T> DerefMut for TinyVec<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.as_mut_slice()
+    }
+}
+
+impl<T> AsRef<[T]> for TinyVec<T> {
+    fn as_ref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
+impl<T> AsMut<[T]> for TinyVec<T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        self.as_mut_slice()
+    }
+}
+
+impl<T> From<T> for TinyVec<T> {
+    fn from(value: T) -> Self {
+        Self::from_single(value)
+    }
+}
+
+impl<T> From<Vec<T>> for TinyVec<T> {
+    fn from(values: Vec<T>) -> Self {
+        Self::from_vec(values)
+    }
+}
+
+impl<T> FromIterator<T> for TinyVec<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut it = iter.into_iter();
+        match it.next() {
+            None => TinyVec::from_vec(Vec::new()),
+            Some(first) => match it.next() {
+                None => TinyVec::from_single(first),
+                Some(second) => {
+                    let mut v = Vec::new();
+                    v.push(first);
+                    v.push(second);
+                    v.extend(it);
+                    TinyVec::from_vec(v)
+                }
+            },
+        }
+    }
+}
+
+impl<T> Extend<T> for TinyVec<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        for x in iter {
+            self.push(x);
+        }
+    }
+}
+
+impl<T> Index<usize> for TinyVec<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        match &self.kind {
+            TinyVecKind::Empty => panic!("index out of bounds"),
+            TinyVecKind::Single(v) => {
+                if index == 0 {
+                    v
+                } else {
+                    panic!("index out of bounds");
+                }
+            }
+            TinyVecKind::Collection(vs) => &vs[index],
+        }
+    }
+}
+
+impl<T> IndexMut<usize> for TinyVec<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        match &mut self.kind {
+            TinyVecKind::Empty => panic!("index out of bounds"),
+            TinyVecKind::Single(v) => {
+                if index == 0 {
+                    v
+                } else {
+                    panic!("index out of bounds");
+                }
+            }
+            TinyVecKind::Collection(vs) => &mut vs[index],
+        }
+    }
+}
+
+impl<T> IntoIterator for TinyVec<T> {
+    type Item = T;
+    type IntoIter = alloc::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_vec().into_iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a TinyVec<T> {
+    type Item = &'a T;
+    type IntoIter = core::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_slice().iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut TinyVec<T> {
+    type Item = &'a mut T;
+    type IntoIter = core::slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_mut_slice().iter_mut()
+    }
+}
+// }}} TinyVec
 
 // Tests {{{
 

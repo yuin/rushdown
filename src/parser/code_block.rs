@@ -40,7 +40,7 @@ impl BlockParser for IndentedCodeBlockParser {
         let (pos, padding) = indent_position(line.as_ref(), reader.line_offset(), 4)?;
         let code_block_ref = arena.new_node(CodeBlock::new(CodeBlockKind::Indented, None));
         reader.advance_and_set_padding(pos, padding);
-        let (_, mut segment) = reader.peek_line_bytes().unwrap();
+        let mut segment = reader.peek_line_segment().unwrap();
         // if code block line starts with a tab, keep a tab as it is.
         if segment.padding() != 0 {
             segment = preserve_leading_tab_in_code_block(&segment, reader, 0);
@@ -66,7 +66,7 @@ impl BlockParser for IndentedCodeBlockParser {
         }
         let (pos, padding) = indent_position(line.as_ref(), reader.line_offset(), 4)?;
         reader.advance_and_set_padding(pos, padding);
-        let (_, seg) = reader.peek_line_bytes().unwrap();
+        let seg = reader.peek_line_segment().unwrap();
         segment = seg;
         // if code block line starts with a tab, keep a tab as it is.
         if segment.padding() != 0 {

@@ -3,7 +3,7 @@ use crate::ast::{Arena, Image, Link, LinkReferenceKind, NodeRef, Text, TextQuali
 use crate::parser::{
     process_delimiters, Context, InlineParser, LinkLabel, ParseStackElemData, ParseStackElemRef,
 };
-use crate::text::{self, block_to_bytes, block_to_value, Reader, Segment, EOS};
+use crate::text::{self, Reader, Segment, ValuesExt, EOS};
 use crate::util::{is_blank, is_punct, is_space, to_link_reference};
 use crate::{as_kind_data, matches_kind};
 use alloc::string::String;
@@ -101,7 +101,7 @@ impl InlineParser for LinkParser {
                     .stop(),
                 segment.start(),
             );
-            let maybe_link_ref_value = block_to_value(reader.between(ssegment), reader.source());
+            let maybe_link_ref_value = reader.between(ssegment.into());
             let maybe_link_ref = maybe_link_ref_value.str(reader.source());
             if maybe_link_ref.len() > 999 {
                 remove_link_label(arena, last_link_label_ref, false, ctx);
@@ -122,7 +122,7 @@ impl InlineParser for LinkParser {
                     ref_def.destination(),
                     maybe_link_ref_value,
                     LinkReferenceKind::Shortcut,
-                    t,
+                    t.clone(),
                 ),
                 None => Link::reference(
                     ref_def.destination(),
@@ -206,11 +206,10 @@ fn parse_reference_link(
     if !closed {
         return None;
     }
-    let segs = reader.between_current(l, pos);
+    let mut link_ref_value = reader.between_current(l, pos);
     reader.advance(1); // skip ']'
-    let mut maybe_link_ref = block_to_bytes(segs, reader.source());
+    let mut maybe_link_ref = link_ref_value.bytes(reader.source());
     let mut kind = LinkReferenceKind::Full;
-    let link_ref_value: text::Value;
     if is_blank(&maybe_link_ref) {
         // collapsed reference link
         let seg: text::Segment = (
@@ -218,11 +217,9 @@ fn parse_reference_link(
             start_pos.start() - 1,
         )
             .into();
-        link_ref_value = block_to_value(reader.between(seg), reader.source());
-        maybe_link_ref = block_to_bytes(reader.between(seg), reader.source());
+        link_ref_value = reader.between(seg.into());
+        maybe_link_ref = link_ref_value.bytes(reader.source());
         kind = LinkReferenceKind::Collapsed;
-    } else {
-        link_ref_value = maybe_link_ref.clone().into();
     }
     // CommonMark spec says:
     //  > A link label can have at most 999 characters inside the square brackets.
@@ -236,7 +233,9 @@ fn parse_reference_link(
     let ref_def = as_kind_data!(arena, link_ref, LinkReferenceDefinition);
 
     Some(match ref_def.title() {
-        Some(t) => Link::reference_with_title(ref_def.destination(), link_ref_value, kind, t),
+        Some(t) => {
+            Link::reference_with_title(ref_def.destination(), link_ref_value, kind, t.clone())
+        }
         None => Link::reference(ref_def.destination(), link_ref_value, kind),
     })
 }
@@ -263,7 +262,7 @@ fn parse_link(reader: &mut text::BlockReader) -> Option<Link> {
     reader.skip_spaces();
 
     let mut destination: Option<text::Value> = None;
-    let mut title: Option<text::Value> = None;
+    let mut title: Option<text::Values> = None;
     // empty link like '[link]()'
     if reader.peek_byte() == b')' {
         reader.advance(1);
@@ -295,7 +294,7 @@ fn parse_link(reader: &mut text::BlockReader) -> Option<Link> {
 }
 
 pub(super) enum ParseLinkTitleResult {
-    Ok(text::Value),
+    Ok(text::Values),
     Unclosed,
     None,
 }
@@ -336,7 +335,7 @@ pub(super) fn parse_link_title(reader: &mut text::BlockReader) -> ParseLinkTitle
         return ParseLinkTitleResult::Unclosed;
     }
 
-    let title = block_to_value(reader.between_current(l, pos), reader.source());
+    let title = reader.between_current(l, pos);
     reader.advance(1); // skip a closer
     ParseLinkTitleResult::Ok(title)
 }

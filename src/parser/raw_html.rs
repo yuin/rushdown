@@ -1,4 +1,3 @@
-use crate::as_kind_data_mut;
 use crate::ast::{Arena, NodeRef, RawHtml};
 use crate::parser::{Context, InlineParser};
 use crate::scanner::{
@@ -37,11 +36,9 @@ impl InlineParser for RawHtmlParser {
             || scan_html_declaration_reader(reader).is_some()
             || scan_html_cdata_reader(reader).is_some()
         {
-            let node_ref = arena.new_node(RawHtml::new());
-            for seg in reader.between_current(line, pos) {
-                as_kind_data_mut!(arena, node_ref, RawHtml).add_value(seg.into());
-            }
-            return Some(node_ref);
+            return Some(arena.new_node(RawHtml::new(
+                reader.between_current(line, pos).into_iter().collect(),
+            )));
         }
         None
     }

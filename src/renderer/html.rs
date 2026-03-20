@@ -8,6 +8,7 @@ use alloc::string::{String, ToString};
 use crate::error::Error;
 use crate::renderer::BuiltinNodesRenderer as _;
 use crate::renderer::{self, *};
+use crate::text::ValuesExt;
 use crate::util::{
     escape_html, escape_url, has_suffix, try_escape_html_byte, try_resolve_entity_reference,
     try_resolve_numeric_reference, try_unescape_punct, AsciiWordSet, EscapeUrlOptions,
@@ -750,7 +751,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
             self.writer.write_safe_str(w, "\"")?;
             if let Some(title) = kd.title() {
                 self.writer.write_safe_str(w, " title=\"")?;
-                self.writer.write(w, title.str(source))?;
+                self.writer.write(w, &title.str(source))?;
                 self.writer.write_safe_str(w, "\"")?;
             }
             write_attributes!(arena, node_ref, source, w, self.format_options, link);
@@ -789,7 +790,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
             self.writer.write_safe_str(w, "\"")?;
             if let Some(title) = kd.title() {
                 self.writer.write_safe_str(w, " title=\"")?;
-                self.writer.write(w, title.str(source))?;
+                self.writer.write(w, &title.str(source))?;
                 self.writer.write_safe_str(w, "\"")?;
             }
             write_attributes!(arena, node_ref, source, w, self.format_options, image);
