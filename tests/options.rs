@@ -30,3 +30,50 @@ fn test_options() {
     );
     suite.execute(&markdown_to_html)
 }
+
+#[test]
+fn test_unsafe_url() {
+    let markdown_to_html = new_markdown_to_html(
+        parser::Options::default(),
+        html::Options::default(),
+        parser::NO_EXTENSIONS,
+        html::NO_EXTENSIONS,
+    );
+    let mut output = String::new();
+    {
+        output.clear();
+        let input = r#"
+[click](&#106;avascript:alert(1))
+"#;
+        markdown_to_html(&mut output, input).expect("failed to render");
+        assert_eq!(
+            output,
+            r#"<p><a href="">click</a></p>
+"#
+        );
+    }
+    {
+        output.clear();
+        let input = r#"
+![alt](javascript:alert(document.domain))
+"#;
+        markdown_to_html(&mut output, input).expect("failed to render");
+        assert_eq!(
+            output,
+            r#"<p><img src="" alt="alt"></p>
+"#
+        );
+    }
+    {
+        output.clear();
+        let input = r#"
+<javascript:alert(document.domain)>
+"#;
+        markdown_to_html(&mut output, input).expect("failed to render");
+        assert_eq!(
+            output,
+            r#"<p><a href="">javascript:alert(document.domain)</a></p>
+"#
+        );
+    }
+}

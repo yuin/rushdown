@@ -735,18 +735,17 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         if entering {
             let kd = as_kind_data!(arena, node_ref, Link);
-            let dest = kd.destination().str(source);
+            let mut dest = escape_url(
+                kd.destination().bytes(source),
+                &EscapeUrlOptions {
+                    resolves_refs: !matches!(kd.link_kind(), LinkKind::Auto(_)),
+                    ..EscapeUrlOptions::for_url()
+                },
+            );
             self.writer.write_safe_str(w, "<a href=\"")?;
-            if self.format_options.allows_unsafe || !is_dangerous_url(dest.as_bytes()) {
-                let mut u = escape_url(
-                    dest.as_bytes(),
-                    &EscapeUrlOptions {
-                        resolves_refs: !matches!(kd.link_kind(), LinkKind::Auto(_)),
-                        ..EscapeUrlOptions::for_url()
-                    },
-                );
-                u = escape_html(u);
-                self.writer.write_safe_str(w, SafeBytes(&u))?;
+            if self.format_options.allows_unsafe || !is_dangerous_url(&dest) {
+                dest = escape_html(dest);
+                self.writer.write_safe_str(w, SafeBytes(&dest))?;
             }
             self.writer.write_safe_str(w, "\"")?;
             if let Some(title) = kd.title() {
@@ -773,10 +772,17 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         if entering {
             let kd = as_kind_data!(arena, node_ref, Image);
-            let dest = kd.destination().str(source);
+            let mut dest = escape_url(
+                kd.destination().bytes(source),
+                &EscapeUrlOptions {
+                    resolves_refs: true,
+                    ..EscapeUrlOptions::for_url()
+                },
+            );
             self.writer.write_safe_str(w, "<img src=\"")?;
-            if self.format_options.allows_unsafe || !is_dangerous_url(dest.as_bytes()) {
-                w.write_str(dest)?;
+            if self.format_options.allows_unsafe || !is_dangerous_url(&dest) {
+                dest = escape_html(dest);
+                self.writer.write_safe_str(w, SafeBytes(&dest))?;
             }
             self.writer.write_safe_str(w, "\" alt=\"")?;
             self.render_texts(w, source, arena, node_ref, ctx)?;

@@ -77,7 +77,6 @@ fn test_override_renderer() {
     let input = r#"
 paragraph
 "#;
-    // let mut output = String::new();
     let mut output = String::new();
     let markdown_to_html = new_markdown_to_html(
         parser::Options::default(),

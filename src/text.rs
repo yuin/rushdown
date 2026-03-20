@@ -939,20 +939,14 @@ impl<'a> BlockReader<'a> {
     /// Returns an iterator that yields segments between the given range.
     pub fn between(&self, range: Segment) -> impl Iterator<Item = Segment> + 'a {
         let from_line = binary_search_block_pos(self.block, range.start()).unwrap_or(0);
+        let mut from_pos = self.block[from_line];
+        if range.start() >= from_pos.start() && range.stop() <= from_pos.stop() {
+            return BetweenBlockIterator::single(range);
+        }
         let to_line =
             binary_search_block_pos(self.block, range.stop()).unwrap_or(self.block.len() - 1);
-
-        if from_line == to_line {
-            let seg = self.block[from_line];
-            if range.start() >= seg.start() && range.stop() <= seg.stop() {
-                return BetweenBlockIterator::single(range);
-            }
-        }
-
         let mut to_pos = self.block[to_line];
         to_pos.start = range.stop();
-
-        let mut from_pos = self.block[from_line];
         from_pos.start = range.start();
 
         BetweenBlockIterator::multi(
