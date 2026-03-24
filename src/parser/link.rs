@@ -133,10 +133,7 @@ impl InlineParser for LinkParser {
         }
         let link = link_opt.expect("should parsed");
         let link_ref = if is_image {
-            arena.new_node(match link.title() {
-                Some(t) => Image::with_title(link.destination().clone(), t.clone()),
-                None => Image::new(link.destination().clone()),
-            })
+            arena.new_node(Image::from_link(link))
         } else {
             arena.new_node(link)
         };

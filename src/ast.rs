@@ -3088,22 +3088,70 @@ pub struct Image {
     destination: text::Value,
 
     title: Option<text::Values>,
+
+    link_kind: LinkKind,
 }
 
 impl Image {
-    /// Creates a new Image with the given destination.
-    pub fn new(destination: impl Into<text::Value>) -> Self {
+    pub(crate) fn from_link(link: Link) -> Self {
         Self {
-            destination: destination.into(),
-            title: None,
+            destination: link.destination,
+            title: link.title,
+            link_kind: link.link_kind,
         }
     }
 
-    /// Creates a new Image with the given destination and title.
-    pub fn with_title(destination: impl Into<text::Value>, title: impl Into<text::Values>) -> Self {
+    /// Creates a new inline image with the given destination.
+    pub fn inline(destination: impl Into<text::Value>) -> Self {
+        Self {
+            destination: destination.into(),
+            title: None,
+            link_kind: LinkKind::Inline,
+        }
+    }
+
+    /// Creates a new inline image with the given destination and title.
+    pub fn inline_with_title(
+        destination: impl Into<text::Value>,
+        title: impl Into<text::Values>,
+    ) -> Self {
         Self {
             destination: destination.into(),
             title: Some(title.into()),
+            link_kind: LinkKind::Inline,
+        }
+    }
+
+    /// Creates a new reference image with the given destination and reference value.
+    pub fn reference(
+        destination: impl Into<text::Value>,
+        value: impl Into<text::Values>,
+        reference_kind: LinkReferenceKind,
+    ) -> Self {
+        Self {
+            destination: destination.into(),
+            title: None,
+            link_kind: LinkKind::Reference(LinkReference {
+                value: value.into(),
+                link_reference_kind: reference_kind,
+            }),
+        }
+    }
+
+    /// Creates a new reference image with the given destination, reference value and title.
+    pub fn reference_with_title(
+        destination: impl Into<text::Value>,
+        value: impl Into<text::Values>,
+        reference_kind: LinkReferenceKind,
+        title: impl Into<text::Values>,
+    ) -> Self {
+        Self {
+            destination: destination.into(),
+            title: Some(title.into()),
+            link_kind: LinkKind::Reference(LinkReference {
+                value: value.into(),
+                link_reference_kind: reference_kind,
+            }),
         }
     }
 
@@ -3129,6 +3177,12 @@ impl Image {
     #[inline(always)]
     pub fn title_str<'a>(&'a self, source: &'a str) -> Option<Cow<'a, str>> {
         self.title.as_ref().map(|t| t.str(source))
+    }
+
+    /// Returns the link kind of this image.
+    #[inline(always)]
+    pub fn link_kind(&self) -> &LinkKind {
+        &self.link_kind
     }
 }
 

@@ -1232,7 +1232,6 @@ const B_PNG: &[u8] = b"png;";
 const B_GIF: &[u8] = b"gif;";
 const B_JPEG: &[u8] = b"jpeg;";
 const B_WEBP: &[u8] = b"webp;";
-const B_SVG: &[u8] = b"svg+xml;";
 const B_JS: &[u8] = b"javascript:";
 const B_VB: &[u8] = b"vbscript:";
 const B_FILE: &[u8] = b"file:";
@@ -1256,7 +1255,6 @@ pub fn is_dangerous_url(url: &[u8]) -> bool {
             || has_prefix_ignore_ascii_case(v, B_GIF)
             || has_prefix_ignore_ascii_case(v, B_JPEG)
             || has_prefix_ignore_ascii_case(v, B_WEBP)
-            || has_prefix_ignore_ascii_case(v, B_SVG)
         {
             return false;
         }
