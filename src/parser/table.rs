@@ -62,10 +62,9 @@ impl TableParagraphTransformer {
         ctx: &mut Context,
     ) -> Option<NodeRef> {
         let source = reader.source();
-        let line = segment
-            .trim_left_space(source)
-            .trim_right_space(source)
-            .bytes(source);
+        let segment = segment.trim_left_space(source).trim_right_space(source);
+        let node_pos = segment.start();
+        let line = segment.bytes(source);
         let mut pos = if line.first().is_some_and(|&b| b == b'|') {
             1
         } else {
@@ -78,6 +77,7 @@ impl TableParagraphTransformer {
         };
 
         let row_ref = arena.new_node(TableRow::new());
+        arena[row_ref].set_pos(node_pos);
         let mut i = 0;
         while pos < limit {
             let alignment = if i >= alignments.len() {
@@ -128,6 +128,7 @@ impl TableParagraphTransformer {
                 (segment.start() + start, segment.start() + pos - end).into();
             col_seg = col_seg.trim_left_space(source).trim_right_space(source);
             as_type_data_mut!(arena, cell_ref, Block).append_source_line(col_seg);
+            arena[cell_ref].set_pos((segment.start() + start).saturating_sub(1));
             row_ref.append_child_fast(arena, cell_ref);
             i += 1;
         }
@@ -190,6 +191,10 @@ impl ParagraphTransformer for TableParagraphTransformer {
                 header_ref.append_child_fast(arena, header_row_ref);
                 let table_ref = arena.new_node(Table::new());
                 table_ref.append_child_fast(arena, header_ref);
+                if let Some(pos) = arena[header_row_ref].pos() {
+                    arena[header_ref].set_pos(pos);
+                    arena[table_ref].set_pos(pos);
+                }
                 let body_ref = arena.new_node(TableBody::new());
                 while i < lines.len() {
                     if let Some(row_ref) =
@@ -199,8 +204,11 @@ impl ParagraphTransformer for TableParagraphTransformer {
                     }
                     i += 1;
                 }
-                if arena[body_ref].first_child().is_some() {
+                if let Some(fc) = arena[body_ref].first_child() {
                     table_ref.append_child_fast(arena, body_ref);
+                    if let Some(pos) = arena[fc].pos() {
+                        arena[body_ref].set_pos(pos);
+                    }
                 }
                 lines.drain(start..i);
                 arena[paragraph_ref].parent().unwrap().insert_after(

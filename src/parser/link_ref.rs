@@ -50,9 +50,8 @@ impl ParagraphTransformer for LinkReferenceParagraphTransformer {
             if lines.is_empty() {
                 break;
             }
-            let ll = &lines[start - offset..end - offset];
-            as_type_data_mut!(arena, link_ref, Block).append_source_lines(ll);
-
+            let l = &lines[start - offset];
+            arena[link_ref].set_pos(l.start());
             let s1 = lines[end - offset..].to_vec();
             lines = lines[..start - offset].to_vec();
             lines.extend_from_slice(&s1);

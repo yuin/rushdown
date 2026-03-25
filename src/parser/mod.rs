@@ -1127,8 +1127,14 @@ impl Parser {
                 if w > 3 && !bp.can_accept_indented_line() {
                     continue;
                 }
+
+                let (_, block_pos) = reader.position();
                 let last_block = pc.opened_blocks.last().cloned();
                 if let Some((node_ref, state)) = bp.open(arena, parent, reader, pc) {
+                    if !arena[node_ref].has_pos() {
+                        arena[node_ref].set_pos(block_pos.start() + pc.block_offset().unwrap_or(0));
+                    }
+
                     // Parser requires last node to be a paragraph.
                     // With table extension:
                     //
@@ -1386,22 +1392,10 @@ impl Parser {
                             let ip = &self.inline_parsers[ip_idx];
                             inline_node_ref_opt =
                                 ip.parse(arena, block_ref, &mut block_reader, ctx);
-                            #[cfg(feature = "inline-pos")]
-                            {
-                                if let Some(inline_node_ref) = inline_node_ref_opt {
-                                    {
-                                        use crate::as_type_data;
-
-                                        if !as_type_data!(arena, inline_node_ref, Inline).has_pos()
-                                        {
-                                            as_type_data_mut!(arena, inline_node_ref, Inline)
-                                                .set_pos(saved_position.start());
-                                        }
-                                    }
-                                    break;
+                            if let Some(inline_node_ref) = inline_node_ref_opt {
+                                if !arena[inline_node_ref].has_pos() {
+                                    arena[inline_node_ref].set_pos(saved_position.start());
                                 }
-                            }
-                            if inline_node_ref_opt.is_some() {
                                 break;
                             }
                             block_reader.set_position(saved_line, saved_position);
@@ -1449,10 +1443,6 @@ impl Parser {
                 text_node.add_qualifiers(TextQualifier::HARD_LINE_BREAK);
             }
             let text_node_ref = arena.new_node(text_node);
-            #[cfg(feature = "inline-pos")]
-            {
-                as_type_data_mut!(arena, text_node_ref, Inline).set_pos(diff.start());
-            }
             block_ref.append_child_fast(arena, text_node_ref);
             block_reader.advance_line();
         }

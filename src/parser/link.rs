@@ -137,16 +137,8 @@ impl InlineParser for LinkParser {
         } else {
             arena.new_node(link)
         };
-        #[cfg(feature = "inline-pos")]
-        {
-            use crate::as_type_data_mut;
-
-            let pos = ctx
-                .link_labels()
-                .elem(last_link_label_ref)
-                .index(arena)
-                .start();
-            as_type_data_mut!(arena, link_ref, Inline).set_pos(pos);
+        if let Some(p) = arena[ctx.link_labels().elem(last_link_label_ref).node_ref].pos() {
+            arena[link_ref].set_pos(p);
         }
 
         process_link_label(arena, link_ref, last_link_label_ref, ctx);

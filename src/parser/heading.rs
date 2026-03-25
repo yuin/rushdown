@@ -222,6 +222,9 @@ impl BlockParser for SetextHeadingParser {
                 lines = blk.take_source();
             }
 
+            if let Some(f) = lines.first() {
+                arena[node_ref].set_pos(f.start());
+            }
             let hblk = as_type_data_mut!(arena, node_ref, Block);
             hblk.append_source_lines(&lines);
             hblk.set_blank_previous_line(has_blank_previous_line);

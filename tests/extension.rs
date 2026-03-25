@@ -308,6 +308,7 @@ impl AstTransformer for AdmonitionAstTransformer {
             };
             if matches_kind!(arena, fc, Paragraph) {
                 let bd = as_type_data!(arena, fc, Block);
+                let pos = bd.source().first().map(|fl| fl.start());
                 if let Some(fl) = bd.source().iter().next() {
                     let line_text = fl.str(reader.source());
                     for kind in &self.options.kinds {
@@ -324,6 +325,7 @@ impl AstTransformer for AdmonitionAstTransformer {
                             for child_ref in children {
                                 admonition_node_ref.append_child(arena, child_ref);
                             }
+                            arena[admonition_node_ref].set_pos(pos.unwrap());
                             arena[bq_ref].parent().unwrap().replace_child(
                                 arena,
                                 bq_ref,

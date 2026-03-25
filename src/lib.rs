@@ -513,6 +513,43 @@ macro_rules! md_ast {
     }};
 }
 
+/// Helper macro to traverse the AST by calling methods on nodes.
+///
+/// # Examples
+/// ```rust
+/// use rushdown::md_ast;
+/// use rushdown::node_path;
+/// use rushdown::as_kind_data;
+/// use rushdown::ast::*;
+/// use rushdown::renderer::html;
+///
+/// let mut arena = Arena::new();
+/// let doc = md_ast!(&mut arena, Document::new() => {
+///     Blockquote::new() => {
+///         Paragraph::new(); { |node: &mut Node| {
+///             node.attributes_mut().insert("class", "paragraph".into());
+///         } } => {
+///             Text::new("Hello, World!")
+///         },
+///         Paragraph::new() => {
+///             Text::new("This is a test.")
+///         }
+///     }
+/// });
+/// let text_opt = node_path!(arena, doc, first_child, first_child, first_child);
+/// assert_eq!(as_kind_data!(arena, text_opt.unwrap(), Text).str(""), "Hello, World!");
+/// ```
+#[macro_export]
+macro_rules! node_path {
+    ($arena:expr, $start:expr $(, $method:ident )* ) => {{
+        let mut node_opt = Some($start);
+        $(
+            node_opt = node_opt.and_then(|n| $arena[n].$method());
+        )*
+        node_opt
+    }};
+}
+
 // }}} macros
 
 // debug stuff {{{
