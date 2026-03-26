@@ -423,6 +423,7 @@ HtmlRenderer constructor function can take these arguments if needed, in any ord
 - [rushdown-emoji](https://crates.io/crates/rushdown-emoji): An emoji extension for rushdown.
 - [rushdown-highlighting](https://crates.io/crates/rushdown-highlighting): A syntax highlight extension for rushdown.
 - [rushdown-diagram](https://crates.io/crates/rushdown-diagram): A diagram visualization(e.g. MermaidJS) extension for rushdown.
+- [rushdown-fenced-div](https://github.com/growler/rushdown-fenced-div): Fenced div extension for rushdown markdown parser.
 
 ## Donation
 BTC: 1NEDSyUmo4SMTDP83JJQSWi1MvQUGGNMZB
