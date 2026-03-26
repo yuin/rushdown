@@ -8,13 +8,12 @@ use alloc::string::{String, ToString};
 use crate::error::Error;
 use crate::renderer::BuiltinNodesRenderer as _;
 use crate::renderer::{self, *};
-use crate::text::ValuesExt;
 use crate::util::{
     escape_html, escape_url, has_suffix, try_escape_html_byte, try_resolve_entity_reference,
     try_resolve_numeric_reference, try_unescape_punct, AsciiWordSet, EscapeUrlOptions,
     UnescapePunctResult,
 };
-use crate::{as_kind_data, as_type_data, matches_kind};
+use crate::{as_kind_data, matches_kind};
 
 // FormatOptions {{{
 
@@ -368,16 +367,8 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
                 self.writer.write_safe_str(w, "\"")?;
             }
             self.writer.write_safe_str(w, ">")?;
-            match kd.value() {
-                BlockText::Source => {
-                    let bd = as_type_data!(arena, node_ref, Block);
-                    for line in bd.source().iter() {
-                        self.writer.raw_write(w, &line.str(source))?;
-                    }
-                }
-                BlockText::Owned(value) => {
-                    self.writer.raw_write(w, value)?;
-                }
+            for line in kd.value().iter(source) {
+                self.writer.raw_write(w, &line)?;
             }
         } else {
             self.writer.write_safe_str(w, "</code></pre>\n")?;
@@ -475,16 +466,8 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         if entering {
             if self.format_options.allows_unsafe {
                 let kd = as_kind_data!(arena, node_ref, HtmlBlock);
-                match kd.value() {
-                    BlockText::Source => {
-                        let bd = as_type_data!(arena, node_ref, Block);
-                        for line in bd.source().iter() {
-                            self.writer.write_html(w, &line.str(source))?;
-                        }
-                    }
-                    BlockText::Owned(value) => {
-                        self.writer.write_html(w, value)?;
-                    }
+                for line in kd.value().iter(source) {
+                    self.writer.write_html(w, &line)?;
                 }
             } else {
                 self.writer

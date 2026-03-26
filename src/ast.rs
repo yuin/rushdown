@@ -109,7 +109,6 @@ use core::result::Result as CoreResult;
 
 use crate::error::*;
 use crate::text;
-use crate::text::ValuesExt;
 use crate::util::StringMap;
 
 use bitflags::bitflags;
@@ -866,38 +865,6 @@ impl KindData {
         }
     }
 
-    /// Returns true if the node is atomic (has no children).
-    pub fn is_atomic(&self) -> bool {
-        match self {
-            KindData::Document(n) => n.is_atomic(),
-            KindData::Paragraph(n) => n.is_atomic(),
-            KindData::Heading(n) => n.is_atomic(),
-            KindData::ThematicBreak(n) => n.is_atomic(),
-            KindData::CodeBlock(n) => n.is_atomic(),
-            KindData::Blockquote(n) => n.is_atomic(),
-            KindData::List(n) => n.is_atomic(),
-            KindData::ListItem(n) => n.is_atomic(),
-            KindData::HtmlBlock(n) => n.is_atomic(),
-            KindData::Text(n) => n.is_atomic(),
-            KindData::CodeSpan(n) => n.is_atomic(),
-            KindData::Emphasis(n) => n.is_atomic(),
-            KindData::Link(n) => n.is_atomic(),
-            KindData::Image(n) => n.is_atomic(),
-            KindData::RawHtml(n) => n.is_atomic(),
-            KindData::LinkReferenceDefinition(n) => n.is_atomic(),
-
-            KindData::Table(n) => n.is_atomic(),
-            KindData::TableHeader(n) => n.is_atomic(),
-            KindData::TableBody(n) => n.is_atomic(),
-            KindData::TableRow(n) => n.is_atomic(),
-            KindData::TableCell(n) => n.is_atomic(),
-
-            KindData::Strikethrough(n) => n.is_atomic(),
-
-            KindData::Extension(n) => n.is_atomic(),
-        }
-    }
-
     /// Pretty prints the node data.
     pub fn pretty_print(&self, w: &mut dyn Write, source: &str, level: usize) -> fmt::Result {
         match self {
@@ -1328,11 +1295,6 @@ pub trait NodeKind {
 
     /// Returns the kind name.
     fn kind_name(&self) -> &'static str;
-
-    /// Returns true if this node has no children.
-    fn is_atomic(&self) -> bool {
-        false
-    }
 }
 
 fn pp(
@@ -1561,26 +1523,6 @@ pub fn walk<E: CoreError + 'static>(
 
 // Blocks {{{
 
-// BlockText {{{
-
-/// Represents the text content of a block node.
-/// Some block nodes directly contain text content, such as html blocks, while others do not, such as paragraphs.
-#[derive(Debug, Clone)]
-pub enum BlockText {
-    /// The text content is stored in the [`TypeData::Block`] of the node.
-    Source,
-
-    /// The text content is stored in the [`KindData`] of the node.
-    Owned(String),
-}
-
-impl From<String> for BlockText {
-    fn from(s: String) -> Self {
-        BlockText::Owned(s)
-    }
-}
-// }}}
-
 //   Document {{{
 
 /// Represents the root document node.
@@ -1801,7 +1743,7 @@ pub struct CodeBlock {
     code_block_kind: CodeBlockKind,
     info: Option<text::Value>,
     fdata: Option<FenceData>,
-    value: BlockText,
+    value: text::Lines,
 }
 
 impl CodeBlock {
@@ -1811,7 +1753,7 @@ impl CodeBlock {
             code_block_kind,
             info,
             fdata: None,
-            value: BlockText::Source,
+            value: text::Lines::default(),
         }
     }
 
@@ -1823,13 +1765,13 @@ impl CodeBlock {
 
     /// Returns the value of the code block.
     #[inline(always)]
-    pub fn value(&self) -> &BlockText {
+    pub fn value(&self) -> &text::Lines {
         &self.value
     }
 
     /// Sets the value of the code block.
     #[inline(always)]
-    pub fn set_value(&mut self, value: impl Into<BlockText>) {
+    pub fn set_value(&mut self, value: impl Into<text::Lines>) {
         self.value = value.into();
     }
 
@@ -1879,10 +1821,6 @@ impl NodeKind for CodeBlock {
     fn kind_name(&self) -> &'static str {
         "CodeBlock"
     }
-
-    fn is_atomic(&self) -> bool {
-        true
-    }
 }
 
 impl PrettyPrint for CodeBlock {
@@ -1906,19 +1844,12 @@ impl PrettyPrint for CodeBlock {
             }
         )?;
         write!(w, "{}Value: ", pp_indent(level))?;
-        match self.value() {
-            BlockText::Source => {
-                writeln!(w, "Same as source")
-            }
-            BlockText::Owned(text) => {
-                writeln!(w, "[ ")?;
-                for line in text.lines() {
-                    write!(w, "{}{}", pp_indent(level + 1), line)?;
-                }
-                writeln!(w)?;
-                writeln!(w, "{}]", pp_indent(level))
-            }
+        writeln!(w, "[ ")?;
+        for line in self.value.iter(source) {
+            write!(w, "{}{}", pp_indent(level + 1), line)?;
         }
+        writeln!(w)?;
+        writeln!(w, "{}]", pp_indent(level))
     }
 }
 
@@ -2187,7 +2118,7 @@ impl Display for HtmlBlockKind {
 #[derive(Debug)]
 pub struct HtmlBlock {
     html_block_kind: HtmlBlockKind,
-    value: BlockText,
+    value: text::Lines,
 }
 
 impl HtmlBlock {
@@ -2195,19 +2126,19 @@ impl HtmlBlock {
     pub fn new(typ: HtmlBlockKind) -> Self {
         Self {
             html_block_kind: typ,
-            value: BlockText::Source,
+            value: text::Lines::default(),
         }
     }
 
     /// Returns the value of the html block.
     #[inline(always)]
-    pub fn value(&self) -> &BlockText {
+    pub fn value(&self) -> &text::Lines {
         &self.value
     }
 
     /// Sets the value of the html block.
     #[inline(always)]
-    pub fn set_value(&mut self, value: impl Into<BlockText>) {
+    pub fn set_value(&mut self, value: impl Into<text::Lines>) {
         self.value = value.into();
     }
 
@@ -2226,14 +2157,10 @@ impl NodeKind for HtmlBlock {
     fn kind_name(&self) -> &'static str {
         "HtmlBlock"
     }
-
-    fn is_atomic(&self) -> bool {
-        true
-    }
 }
 
 impl PrettyPrint for HtmlBlock {
-    fn pretty_print(&self, w: &mut dyn Write, _source: &str, level: usize) -> fmt::Result {
+    fn pretty_print(&self, w: &mut dyn Write, source: &str, level: usize) -> fmt::Result {
         writeln!(
             w,
             "{}HtmlBlockKind: {}",
@@ -2241,19 +2168,12 @@ impl PrettyPrint for HtmlBlock {
             self.html_block_kind()
         )?;
         write!(w, "{}Value: ", pp_indent(level))?;
-        match self.value() {
-            BlockText::Source => {
-                writeln!(w, "Same as source")
-            }
-            BlockText::Owned(text) => {
-                writeln!(w, "[ ")?;
-                for line in text.lines() {
-                    write!(w, "{}{}", pp_indent(level + 1), line)?;
-                }
-                writeln!(w)?;
-                writeln!(w, "{}]", pp_indent(level))
-            }
+        writeln!(w, "[ ")?;
+        for line in self.value.iter(source) {
+            write!(w, "{}{}", pp_indent(level + 1), line)?;
         }
+        writeln!(w)?;
+        writeln!(w, "{}]", pp_indent(level))
     }
 }
 
@@ -2270,14 +2190,17 @@ impl From<HtmlBlock> for KindData {
 /// Represents a link reference definition node.
 #[derive(Debug)]
 pub struct LinkReferenceDefinition {
-    label: text::Values,
+    label: text::MultilineValue,
     destination: text::Value,
-    title: Option<text::Values>,
+    title: Option<text::MultilineValue>,
 }
 
 impl LinkReferenceDefinition {
     /// Creates a new [`LinkReferenceDefinition`] node.
-    pub fn new(label: impl Into<text::Values>, destination: impl Into<text::Value>) -> Self {
+    pub fn new(
+        label: impl Into<text::MultilineValue>,
+        destination: impl Into<text::Value>,
+    ) -> Self {
         Self {
             label: label.into(),
             destination: destination.into(),
@@ -2287,9 +2210,9 @@ impl LinkReferenceDefinition {
 
     /// Creates a new [`LinkReferenceDefinition`] node with a title.
     pub fn with_title(
-        label: impl Into<text::Values>,
+        label: impl Into<text::MultilineValue>,
         destination: impl Into<text::Value>,
-        title: impl Into<text::Values>,
+        title: impl Into<text::MultilineValue>,
     ) -> Self {
         Self {
             label: label.into(),
@@ -2300,7 +2223,7 @@ impl LinkReferenceDefinition {
 
     /// Returns the label of the link reference definition.
     #[inline(always)]
-    pub fn label(&self) -> &text::Values {
+    pub fn label(&self) -> &text::MultilineValue {
         &self.label
     }
 
@@ -2324,7 +2247,7 @@ impl LinkReferenceDefinition {
 
     /// Returns the title of the link reference definition.
     #[inline(always)]
-    pub fn title(&self) -> Option<&text::Values> {
+    pub fn title(&self) -> Option<&text::MultilineValue> {
         self.title.as_ref()
     }
 
@@ -2342,10 +2265,6 @@ impl NodeKind for LinkReferenceDefinition {
 
     fn kind_name(&self) -> &'static str {
         "LinkReferenceDefinition"
-    }
-
-    fn is_atomic(&self) -> bool {
-        true
     }
 }
 
@@ -2685,10 +2604,6 @@ impl NodeKind for Text {
     fn kind_name(&self) -> &'static str {
         "Text"
     }
-
-    fn is_atomic(&self) -> bool {
-        true
-    }
 }
 
 impl PrettyPrint for Text {
@@ -2726,10 +2641,6 @@ impl NodeKind for CodeSpan {
 
     fn kind_name(&self) -> &'static str {
         "CodeSpan"
-    }
-
-    fn is_atomic(&self) -> bool {
-        true
     }
 }
 
@@ -2815,7 +2726,7 @@ pub enum LinkReferenceKind {
 /// Represents a link reference in the document.
 #[derive(Debug)]
 pub struct LinkReference {
-    value: text::Values,
+    value: text::MultilineValue,
     link_reference_kind: LinkReferenceKind,
 }
 
@@ -2828,7 +2739,7 @@ impl LinkReference {
 
     /// Returns the reference value of this link reference.
     #[inline(always)]
-    pub fn value(&self) -> &text::Values {
+    pub fn value(&self) -> &text::MultilineValue {
         &self.value
     }
 
@@ -2864,7 +2775,7 @@ impl AutoLink {
 pub struct Link {
     destination: text::Value,
 
-    title: Option<text::Values>,
+    title: Option<text::MultilineValue>,
 
     link_kind: LinkKind,
 }
@@ -2882,7 +2793,7 @@ impl Link {
     /// Creates a new inline link with the given destination and title.
     pub fn inline_with_title(
         destination: impl Into<text::Value>,
-        title: impl Into<text::Values>,
+        title: impl Into<text::MultilineValue>,
     ) -> Self {
         Self {
             destination: destination.into(),
@@ -2894,7 +2805,7 @@ impl Link {
     /// Creates a new reference link with the given destination and reference value.
     pub fn reference(
         destination: impl Into<text::Value>,
-        value: impl Into<text::Values>,
+        value: impl Into<text::MultilineValue>,
         reference_kind: LinkReferenceKind,
     ) -> Self {
         Self {
@@ -2910,9 +2821,9 @@ impl Link {
     /// Creates a new reference link with the given destination, reference value and title.
     pub fn reference_with_title(
         destination: impl Into<text::Value>,
-        value: impl Into<text::Values>,
+        value: impl Into<text::MultilineValue>,
         reference_kind: LinkReferenceKind,
-        title: impl Into<text::Values>,
+        title: impl Into<text::MultilineValue>,
     ) -> Self {
         Self {
             destination: destination.into(),
@@ -2947,7 +2858,7 @@ impl Link {
 
     /// Returns the title of the link, if it exists.
     #[inline(always)]
-    pub fn title(&self) -> Option<&text::Values> {
+    pub fn title(&self) -> Option<&text::MultilineValue> {
         self.title.as_ref()
     }
 
@@ -3031,7 +2942,7 @@ impl From<Link> for KindData {
 pub struct Image {
     destination: text::Value,
 
-    title: Option<text::Values>,
+    title: Option<text::MultilineValue>,
 
     link_kind: LinkKind,
 }
@@ -3057,7 +2968,7 @@ impl Image {
     /// Creates a new inline image with the given destination and title.
     pub fn inline_with_title(
         destination: impl Into<text::Value>,
-        title: impl Into<text::Values>,
+        title: impl Into<text::MultilineValue>,
     ) -> Self {
         Self {
             destination: destination.into(),
@@ -3069,7 +2980,7 @@ impl Image {
     /// Creates a new reference image with the given destination and reference value.
     pub fn reference(
         destination: impl Into<text::Value>,
-        value: impl Into<text::Values>,
+        value: impl Into<text::MultilineValue>,
         reference_kind: LinkReferenceKind,
     ) -> Self {
         Self {
@@ -3085,9 +2996,9 @@ impl Image {
     /// Creates a new reference image with the given destination, reference value and title.
     pub fn reference_with_title(
         destination: impl Into<text::Value>,
-        value: impl Into<text::Values>,
+        value: impl Into<text::MultilineValue>,
         reference_kind: LinkReferenceKind,
-        title: impl Into<text::Values>,
+        title: impl Into<text::MultilineValue>,
     ) -> Self {
         Self {
             destination: destination.into(),
@@ -3113,7 +3024,7 @@ impl Image {
 
     /// Returns the title of the link, if it exists.
     #[inline(always)]
-    pub fn title(&self) -> Option<&text::Values> {
+    pub fn title(&self) -> Option<&text::MultilineValue> {
         self.title.as_ref()
     }
 
@@ -3168,18 +3079,18 @@ impl From<Image> for KindData {
 /// Represents an inline raw HTML node.
 #[derive(Debug)]
 pub struct RawHtml {
-    value: text::Values,
+    value: text::MultilineValue,
 }
 
 impl RawHtml {
     /// Creates a new RawHtml
-    pub fn new(value: text::Values) -> Self {
+    pub fn new(value: text::MultilineValue) -> Self {
         Self { value }
     }
 
     /// Returns the value of this raw HTML.
     #[inline(always)]
-    pub fn value(&self) -> &text::Values {
+    pub fn value(&self) -> &text::MultilineValue {
         &self.value
     }
 
@@ -3201,10 +3112,6 @@ impl NodeKind for RawHtml {
 
     fn kind_name(&self) -> &'static str {
         "RawHtml"
-    }
-
-    fn is_atomic(&self) -> bool {
-        true
     }
 }
 

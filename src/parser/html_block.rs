@@ -8,7 +8,7 @@ use crate::scanner::{
 };
 use crate::text::Reader as _;
 use crate::util::is_blank;
-use crate::{as_kind_data, as_type_data, as_type_data_mut, matches_kind, text};
+use crate::{as_kind_data, as_kind_data_mut, as_type_data, as_type_data_mut, matches_kind, text};
 
 /// [`BlockParser`] for html blocks.
 #[derive(Debug, Default)]
@@ -105,11 +105,13 @@ impl BlockParser for HtmlBlockParser {
 
     fn close(
         &self,
-        _arena: &mut Arena,
-        _node_ref: NodeRef,
+        arena: &mut Arena,
+        node_ref: NodeRef,
         _reader: &mut text::BasicReader,
         _ctx: &mut Context,
     ) {
+        let lines = as_type_data_mut!(arena, node_ref, Block).take_source();
+        as_kind_data_mut!(arena, node_ref, HtmlBlock).set_value(lines);
     }
 
     fn can_interrupt_paragraph(&self) -> bool {

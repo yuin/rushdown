@@ -3,7 +3,7 @@ use crate::ast::{Arena, Image, Link, LinkReferenceKind, NodeRef, Text, TextQuali
 use crate::parser::{
     process_delimiters, Context, InlineParser, LinkLabel, ParseStackElemData, ParseStackElemRef,
 };
-use crate::text::{self, Reader, Segment, ValuesExt, EOS};
+use crate::text::{self, Reader, Segment, EOS};
 use crate::util::{is_blank, is_punct, is_space, to_link_reference};
 use crate::{as_kind_data, matches_kind};
 use alloc::string::String;
@@ -251,7 +251,7 @@ fn parse_link(reader: &mut text::BlockReader) -> Option<Link> {
     reader.skip_spaces();
 
     let mut destination: Option<text::Value> = None;
-    let mut title: Option<text::Values> = None;
+    let mut title: Option<text::MultilineValue> = None;
     // empty link like '[link]()'
     if reader.peek_byte() == b')' {
         reader.advance(1);
@@ -283,7 +283,7 @@ fn parse_link(reader: &mut text::BlockReader) -> Option<Link> {
 }
 
 pub(super) enum ParseLinkTitleResult {
-    Ok(text::Values),
+    Ok(text::MultilineValue),
     Unclosed,
     None,
 }

@@ -99,7 +99,7 @@ impl BlockParser for IndentedCodeBlockParser {
             }
         }
         lines.truncate(length + 1);
-        block.put_back_source(lines);
+        as_kind_data_mut!(arena, node_ref, CodeBlock).set_value(lines);
     }
 
     fn can_accept_indented_line(&self) -> bool {
@@ -210,11 +210,13 @@ impl BlockParser for FencedCodeBlockParser {
 
     fn close(
         &self,
-        _arena: &mut Arena,
-        _node_ref: NodeRef,
+        arena: &mut Arena,
+        node_ref: NodeRef,
         _reader: &mut text::BasicReader,
         _ctx: &mut Context,
     ) {
+        let lines = as_type_data_mut!(arena, node_ref, Block).take_source();
+        as_kind_data_mut!(arena, node_ref, CodeBlock).set_value(lines);
     }
 
     fn can_interrupt_paragraph(&self) -> bool {

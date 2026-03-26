@@ -1307,11 +1307,12 @@ impl Parser {
         reader: &mut text::BasicReader,
         ctx: &mut Context,
     ) {
-        if arena[block_ref].kind_data().is_atomic() {
+        let bd = as_type_data_mut!(arena, block_ref, Block);
+        if bd.source().is_empty() {
             return;
         }
 
-        let lines = as_type_data_mut!(arena, block_ref, Block).take_source();
+        let lines = bd.take_source();
         let mut escaped = false;
         let mut block_reader = text::BlockReader::new(reader.source(), &lines);
 

@@ -36,9 +36,7 @@ impl InlineParser for RawHtmlParser {
             || scan_html_declaration_reader(reader).is_some()
             || scan_html_cdata_reader(reader).is_some()
         {
-            return Some(arena.new_node(RawHtml::new(
-                reader.between_current(line, pos).into_iter().collect(),
-            )));
+            return Some(arena.new_node(RawHtml::new(reader.between_current(line, pos))));
         }
         None
     }

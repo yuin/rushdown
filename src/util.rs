@@ -1793,7 +1793,7 @@ impl<T> TinyVec<T> {
         }
     }
 
-    /// Converts the TinyVec into a Vec<T>.
+    /// Converts the TinyVec into a `Vec<T>`.
     pub fn into_vec(self) -> Vec<T> {
         match self.kind {
             TinyVecKind::Empty => Vec::new(),

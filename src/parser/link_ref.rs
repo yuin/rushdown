@@ -6,7 +6,7 @@ use crate::ast::{Arena, LinkReferenceDefinition, NodeRef};
 use crate::parser::{
     parse_link_destination, parse_link_title, Context, ParagraphTransformer, ParseLinkTitleResult,
 };
-use crate::text::{self, Reader, ValuesExt, EOS};
+use crate::text::{self, Reader, EOS};
 use crate::util::indent_width;
 use crate::util::is_blank;
 use crate::{as_kind_data, as_type_data_mut};
