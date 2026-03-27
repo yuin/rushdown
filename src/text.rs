@@ -335,6 +335,12 @@ impl From<&[u8]> for MultilineValue {
     }
 }
 
+impl From<Vec<u8>> for MultilineValue {
+    fn from(s: Vec<u8>) -> Self {
+        MultilineValue::String(String::from_utf8_lossy(&s).into_owned())
+    }
+}
+
 impl From<Cow<'_, str>> for MultilineValue {
     fn from(s: Cow<'_, str>) -> Self {
         MultilineValue::String(s.into_owned())
@@ -353,6 +359,12 @@ impl From<Value> for MultilineValue {
             Value::Index(index) => MultilineValue::Indices(TinyVec::from_single(index)),
             Value::String(s) => MultilineValue::String(s),
         }
+    }
+}
+
+impl From<Segment> for MultilineValue {
+    fn from(segment: Segment) -> Self {
+        MultilineValue::Indices(TinyVec::from_single(segment.into()))
     }
 }
 

@@ -8,8 +8,10 @@ use alloc::borrow::Cow;
 use alloc::string::String;
 
 use crate::ast::Attributes;
-use crate::text::{self, Segment};
-use crate::util::{is_punct, is_space, resolve_entity_references, resolve_numeric_references};
+use crate::text::{self};
+use crate::util::{
+    is_punct, is_space, resolve_entity_references, resolve_numeric_references, TinyVec,
+};
 
 /// Parses attributes from the reader.
 /// If attributes are found, returns Some(Attributes).
@@ -40,7 +42,7 @@ pub fn parse_attributes<'a>(reader: &mut impl text::Reader<'a>) -> Option<Attrib
         if let Some((name, value)) = parse_attribute(reader) {
             if name == "class" && attrs.contains_key("class") {
                 let s = String::from(attrs.get("class").unwrap().str(reader.source()));
-                attrs.insert(name, (s + " " + value.str(reader.source())).into());
+                attrs.insert(name, (s + " " + &value.str(reader.source())).into());
             } else {
                 attrs.insert(name, value);
             }
@@ -56,7 +58,9 @@ pub fn parse_attributes<'a>(reader: &mut impl text::Reader<'a>) -> Option<Attrib
     }
 }
 
-fn parse_attribute<'a>(reader: &mut impl text::Reader<'a>) -> Option<(String, text::Value)> {
+fn parse_attribute<'a>(
+    reader: &mut impl text::Reader<'a>,
+) -> Option<(String, text::MultilineValue)> {
     reader.skip_spaces();
     let c = reader.peek_byte();
     if c == b'#' || c == b'.' {
@@ -110,7 +114,7 @@ fn parse_attribute<'a>(reader: &mut impl text::Reader<'a>) -> Option<(String, te
     Some((String::from_utf8_lossy(name).into_owned(), value))
 }
 
-fn parse_attribute_value<'a>(reader: &mut impl text::Reader<'a>) -> Option<text::Value> {
+fn parse_attribute_value<'a>(reader: &mut impl text::Reader<'a>) -> Option<text::MultilineValue> {
     reader.skip_spaces();
     match reader.peek_byte() {
         b'"' => parse_quoted_attribute_value(reader, b'"'),
@@ -122,57 +126,58 @@ fn parse_attribute_value<'a>(reader: &mut impl text::Reader<'a>) -> Option<text:
 fn parse_quoted_attribute_value<'a>(
     reader: &mut impl text::Reader<'a>,
     q: u8,
-) -> Option<text::Value> {
+) -> Option<text::MultilineValue> {
     reader.advance(1); // skip a opening quote
-    let mut seg = Segment::new(0, 0);
-    let mut sv: Option<String> = None;
+    let mut value = TinyVec::<text::Index>::empty();
+    let mut break_loop = false;
     loop {
         let (line, mut s) = reader.peek_line_bytes()?;
-        let mut break_loop = false;
-        if let Some(i) = line.iter().position(|&b| b == q) {
+        if let Some(i) = memchr::memchr(q, &line) {
             reader.advance(i + 1);
             s = s.with_stop(s.start() + i);
             break_loop = true;
         } else {
             reader.advance_line();
         }
-        if seg.is_empty() {
-            seg = s;
-        } else if seg.stop() == s.start() {
-            seg = seg.with_stop(s.stop());
-        } else {
-            match sv {
-                Some(ref mut string_value) => {
-                    string_value.push_str(s.str(reader.source()).as_ref());
-                }
-                None => {
-                    let mut string_value = String::from(seg.str(reader.source()));
-                    string_value.push_str(s.str(reader.source()).as_ref());
-                    sv = Some(string_value);
-                }
-            }
-        }
+        value.push(s.into());
 
         if break_loop {
             break;
         }
     }
-    if let Some(s) = sv {
-        let mut cw = resolve_entity_references(s.as_bytes());
-        cw = resolve_numeric_references(cw);
-        Some(cw.as_ref().into())
+    if !break_loop {
+        return None;
+    }
+    if value.len() == 1 {
+        // fast path
+        let resolved =
+            resolve_numeric_references(resolve_entity_references(value[0].bytes(reader.source())));
+        Some(match resolved {
+            Cow::Borrowed(_) => value.into(),
+            Cow::Owned(s) => s.into(),
+        })
     } else {
-        let s = seg.str(reader.source());
-        let mut cw = resolve_entity_references(s.as_bytes());
-        cw = resolve_numeric_references(cw);
-        match cw {
-            Cow::Borrowed(_) => Some(seg.into()),
-            Cow::Owned(s) => Some(s.into()),
+        let mut result = String::new();
+        let mut has_resolved = false;
+        for idx in &value {
+            let resolved =
+                resolve_numeric_references(resolve_entity_references(idx.bytes(reader.source())));
+            result.push_str(unsafe { core::str::from_utf8_unchecked(&resolved) });
+            if matches!(resolved, Cow::Owned(_)) {
+                has_resolved = true;
+            }
+        }
+        if has_resolved {
+            Some(result.into())
+        } else {
+            Some(value.into())
         }
     }
 }
 
-fn parse_unquoted_attribute_value<'a>(reader: &mut impl text::Reader<'a>) -> Option<text::Value> {
+fn parse_unquoted_attribute_value<'a>(
+    reader: &mut impl text::Reader<'a>,
+) -> Option<text::MultilineValue> {
     let (line, mut s) = reader.peek_line_bytes()?;
     let i = line
         .iter()
@@ -194,13 +199,11 @@ fn parse_unquoted_attribute_value<'a>(reader: &mut impl text::Reader<'a>) -> Opt
     }
     reader.advance(i);
     s = s.with_stop(s.start() + i);
-    let s_str = s.str(reader.source());
-    let mut cw = resolve_entity_references(s_str.as_bytes());
-    cw = resolve_numeric_references(cw);
-    match cw {
-        Cow::Borrowed(_) => Some(s.into()),
-        Cow::Owned(s) => Some(s.into()),
-    }
+    let resolved = resolve_numeric_references(resolve_entity_references(s.bytes(reader.source())));
+    Some(match resolved {
+        Cow::Borrowed(_) => s.into(),
+        Cow::Owned(s) => s.into(),
+    })
 }
 
 // Tests {{{
@@ -221,19 +224,25 @@ mod tests {
         let mut reader = text::BasicReader::new(source);
         let attrs = parse_attributes(&mut reader).unwrap();
         assert_eq!(attrs.get("id").unwrap().str(source), "my-id");
-        assert!(matches!(attrs.get("id").unwrap(), &text::Value::Index(_)));
+        assert!(matches!(
+            attrs.get("id").unwrap(),
+            &text::MultilineValue::Indices(_)
+        ));
         assert_eq!(attrs.get("class").unwrap().str(source), "class1 class2");
         assert!(matches!(
             attrs.get("class").unwrap(),
-            &text::Value::String(_)
+            &text::MultilineValue::String(_)
         ));
         assert_eq!(attrs.get("title").unwrap().str(source), "My &Title");
         assert!(matches!(
             attrs.get("title").unwrap(),
-            &text::Value::String(_)
+            &text::MultilineValue::String(_)
         ));
         assert_eq!(attrs.get("attr").unwrap().str(source), "aaa");
-        assert!(matches!(attrs.get("attr").unwrap(), &text::Value::Index(_)));
+        assert!(matches!(
+            attrs.get("attr").unwrap(),
+            &text::MultilineValue::Indices(_)
+        ));
 
         let (line, _) = reader.peek_line().unwrap();
         assert_eq!(line.as_ref(), " rest of line");
@@ -250,7 +259,7 @@ mod tests {
         );
         assert!(matches!(
             attrs.get("title").unwrap(),
-            &text::Value::Index(_)
+            &text::MultilineValue::Indices(_)
         ));
         let (line, _) = reader.peek_line().unwrap();
         assert_eq!(line.as_ref(), " rest");

@@ -761,7 +761,7 @@ impl Meta {
 pub type Metadata = StringMap<Meta>;
 
 /// Attributes associated with a node.
-pub type Attributes = StringMap<text::Value>;
+pub type Attributes = StringMap<text::MultilineValue>;
 
 // }}} Metadata & Attributes
 
