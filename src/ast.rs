@@ -109,7 +109,7 @@ use core::result::Result as CoreResult;
 
 use crate::error::*;
 use crate::text;
-use crate::util::StringMap;
+use crate::util::{StringMap, TinyVec};
 
 use bitflags::bitflags;
 
@@ -2524,13 +2524,9 @@ bitflags! {
         /// Indicates given text has hard line break at the end.
         const HARD_LINE_BREAK = 1 << 1;
 
-        /// Indicates given text should be rendered without unescaping
-        /// back slash escapes and resolving references.
-        const RAW = 1 << 2;
-
         /// Indicates given text is temporary and might be removed
         /// later during processing.
-        const TEMP = 1 << 3;
+        const TEMP = 1 << 2;
     }
 }
 
@@ -2623,14 +2619,82 @@ impl From<Text> for KindData {
 
 //   CodeSpan {{{
 
+#[derive(Debug)]
+enum CodeSpanValue {
+    Indices(TinyVec<text::Index>),
+    String(String),
+}
+
 /// Represents an inline code span in the document.
-#[derive(Debug, Default)]
-pub struct CodeSpan {}
+#[derive(Debug)]
+pub struct CodeSpan {
+    value: CodeSpanValue,
+}
 
 impl CodeSpan {
-    /// Creates a new CodeSpan.
-    pub fn new() -> Self {
-        Self::default()
+    /// Creates a new empty [`CodeSpan`] node.
+    pub fn empty() -> Self {
+        Self {
+            value: CodeSpanValue::Indices(TinyVec::empty()),
+        }
+    }
+
+    /// Creates a new [`CodeSpan`] node from the given indices.
+    pub fn from_indices(indices: impl Into<TinyVec<text::Index>>) -> Self {
+        Self {
+            value: CodeSpanValue::Indices(indices.into()),
+        }
+    }
+
+    /// Creates a new [`CodeSpan`] node from the given string.
+    pub fn from_string(value: impl Into<String>) -> Self {
+        Self {
+            value: CodeSpanValue::String(value.into()),
+        }
+    }
+
+    pub(crate) fn indices(&self) -> Option<&[text::Index]> {
+        match &self.value {
+            CodeSpanValue::Indices(indices) => Some(indices.as_slice()),
+            _ => None,
+        }
+    }
+
+    /// Returns the string representation of the code span value of this code span.
+    /// If the value contains a newline character, it will be replaced with a space character.
+    pub fn value_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
+        match &self.value {
+            CodeSpanValue::Indices(indices) => {
+                if indices.is_empty() {
+                    Cow::Borrowed("")
+                } else if indices.len() == 1 {
+                    let idx = indices[0];
+                    if source.as_bytes()[idx.stop() - 1] != b'\n' {
+                        Cow::Borrowed(idx.str(source))
+                    } else {
+                        let idx: text::Index = (idx.start(), idx.stop() - 1).into();
+                        let s = idx.str(source);
+                        let mut st = String::with_capacity(s.len() + 1);
+                        st.push_str(s);
+                        st.push(' ');
+                        Cow::Owned(st)
+                    }
+                } else {
+                    let mut s = String::new();
+                    for idx in indices.iter() {
+                        s.push_str(idx.str(source));
+                    }
+                    Cow::Owned(s.replace('\n', " "))
+                }
+            }
+            CodeSpanValue::String(s) => {
+                if memchr::memchr(b'\n', s.as_bytes()).is_some() {
+                    Cow::Owned(s.replace('\n', " "))
+                } else {
+                    Cow::Borrowed(s)
+                }
+            }
+        }
     }
 }
 

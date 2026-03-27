@@ -1,7 +1,7 @@
-use crate::as_kind_data_mut;
-use crate::ast::{Arena, CodeSpan, NodeRef, Text, TextQualifier};
+use crate::ast::{Arena, CodeSpan, NodeRef, Text};
 use crate::parser::{Context, InlineParser};
 use crate::text::{self, Reader, Segment};
+use crate::util::TinyVec;
 
 /// [`InlineParser`] for inline codes.
 #[derive(Debug, Default)]
@@ -30,12 +30,11 @@ impl InlineParser for CodeSpanParser {
         let opener = line.iter().take_while(|&&c| c == b'`').count();
         reader.advance(opener);
         let (l, pos) = reader.position();
-        let code_span_ref = arena.new_node(CodeSpan::new());
+        let mut lines = TinyVec::<text::Index>::empty();
         let mut blank = true;
         'try_lines: loop {
             let Some(line_segment_opt) = reader.peek_line_bytes() else {
                 reader.set_position(l, pos);
-                code_span_ref.delete(arena);
                 return Some(arena.new_node(Text::new(Segment::new(
                     start_segment.start(),
                     start_segment.start() + opener,
@@ -54,9 +53,7 @@ impl InlineParser for CodeSpanParser {
                     if closure == opener && (i >= line.len() || line[i] != b'`') {
                         segment = segment.with_stop(segment.start() + i - closure);
                         if !segment.is_empty() {
-                            let text_node_ref =
-                                arena.new_node(Text::with_qualifiers(segment, TextQualifier::RAW));
-                            code_span_ref.append_child_fast(arena, text_node_ref);
+                            lines.push(segment.into());
                             if !segment.is_blank(reader.source()) {
                                 blank = false;
                             }
@@ -74,48 +71,30 @@ impl InlineParser for CodeSpanParser {
             if !segment.is_blank(reader.source()) {
                 blank = false;
             }
-            let text_node_ref = arena.new_node(Text::with_qualifiers(segment, TextQualifier::RAW));
-            code_span_ref.append_child_fast(arena, text_node_ref);
+            lines.push(segment.into());
             reader.advance_line();
         }
 
         if !blank {
             // trim first halfspace and last halfspace
-            if let Some(first_child_ref) = arena[code_span_ref].first_child() {
+            if let Some(fidx) = lines.first() {
                 let bsource = reader.source().as_bytes();
-                {
-                    let ftext = as_kind_data_mut!(arena, first_child_ref, Text);
-                    let fidx_ref = ftext.index().unwrap();
-                    if fidx_ref.is_empty() || !is_space_or_newline(bsource[fidx_ref.start()]) {
-                        return Some(code_span_ref);
-                    }
+                if fidx.is_empty() || !is_space_or_newline(bsource[fidx.start()]) {
+                    return Some(arena.new_node(CodeSpan::from_indices(lines)));
                 }
                 {
-                    let last_child_ref = arena[code_span_ref].last_child().unwrap();
-                    let ltext = as_kind_data_mut!(arena, last_child_ref, Text);
-                    let lidx_ref = ltext.index().unwrap();
-                    if lidx_ref.is_empty() || !is_space_or_newline(bsource[lidx_ref.stop() - 1]) {
-                        return Some(code_span_ref);
+                    let lidx = lines.last().unwrap();
+                    if lidx.is_empty() || !is_space_or_newline(bsource[lidx.stop() - 1]) {
+                        return Some(arena.new_node(CodeSpan::from_indices(lines)));
                     }
                 }
 
-                let ftext = as_kind_data_mut!(arena, first_child_ref, Text);
-                let fidx = ftext
-                    .index()
-                    .unwrap()
-                    .with_start(ftext.index().unwrap().start() + 1);
-                ftext.set(fidx);
-
-                let last_child_ref = arena[code_span_ref].last_child().unwrap();
-                let ltext = as_kind_data_mut!(arena, last_child_ref, Text);
-                let lidx = ltext
-                    .index()
-                    .unwrap()
-                    .with_stop(ltext.index().unwrap().stop() - 1);
-                ltext.set(lidx);
+                lines[0] = (fidx.start() + 1, fidx.stop()).into();
+                let l = lines.len() - 1;
+                lines[l] = (lines[l].start(), lines[l].stop() - 1).into();
             }
         }
-        Some(code_span_ref)
+        Some(arena.new_node(CodeSpan::from_indices(lines)))
     }
 }
 

@@ -2,7 +2,7 @@ extern crate alloc;
 
 use alloc::string::String;
 
-use crate::ast::{Arena, Link, NodeRef, Text, TextQualifier};
+use crate::ast::{Arena, Link, NodeRef, Text};
 use crate::parser::{Context, InlineParser};
 use crate::scanner::{scan_email, scan_url};
 use crate::text::{self, Reader, Segment};
@@ -38,7 +38,7 @@ impl InlineParser for AutoLinkParser {
                 let seg: Segment = (segment.start() + 1, segment.start() + p + 1).into();
                 let seg_text: Segment = (segment.start(), segment.start() + p + 2).into();
                 let node_ref = arena.new_node(Link::auto(seg, seg_text));
-                let text_ref = arena.new_node(Text::with_qualifiers(seg, TextQualifier::RAW));
+                let text_ref = arena.new_node(Text::new(seg));
                 node_ref.append_child_fast(arena, text_ref);
                 return Some(node_ref);
             }
@@ -54,7 +54,7 @@ impl InlineParser for AutoLinkParser {
                 s.push_str(addr);
                 let seg: Segment = (segment.start(), segment.start() + p + 2).into();
                 let node_ref = arena.new_node(Link::auto(s, seg));
-                let text_ref = arena.new_node(Text::with_qualifiers(addr_seg, TextQualifier::RAW));
+                let text_ref = arena.new_node(Text::new(addr_seg));
                 node_ref.append_child_fast(arena, text_ref);
                 return Some(node_ref);
             }

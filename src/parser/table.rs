@@ -3,10 +3,10 @@ use core::cell::RefCell;
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
 
 use crate::{
-    as_type_data_mut,
+    as_kind_data, as_type_data_mut,
     ast::{
-        self, Arena, KindData, NodeRef, Table, TableBody, TableCell, TableCellAlignment,
-        TableHeader, TableRow, Text, TextQualifier, WalkStatus,
+        self, Arena, CodeSpan, KindData, NodeRef, Table, TableBody, TableCell, TableCellAlignment,
+        TableHeader, TableRow, WalkStatus,
     },
     context::{ContextKey, ContextKeyRegistry, ObjectValue},
     parser::{self, AstTransformer, Context, ParagraphTransformer},
@@ -15,7 +15,7 @@ use crate::{
         scan_table_delim_right,
     },
     text::{self, Reader, Segment},
-    util::{indent_width, is_blank, is_punct, is_space, trim_right_space},
+    util::{indent_width, is_blank, is_punct, is_space, trim_right_space, TinyVec},
     Result,
 };
 
@@ -327,37 +327,43 @@ impl AstTransformer for TableAstTransformer {
                 .expect("walk failed");
             }
         }
+
         for (code_span, i) in code_spans {
-            let mut c_opt = arena[code_span].first_child();
-            while let Some(mut c) = c_opt {
-                let next = arena[c].next_sibling();
-                let parent = arena[c].parent().unwrap();
-                if let KindData::Text(t) = arena[c].kind_data() {
-                    if let Some(mut index) = t.index().copied() {
-                        'l: loop {
-                            for &pos in lst[i].pos.iter() {
-                                if index.start() <= pos && pos < index.stop() {
-                                    let t1_ref = arena.new_node(Text::with_qualifiers(
-                                        (index.start(), pos),
-                                        TextQualifier::RAW,
-                                    ));
-                                    let t2_ref = arena.new_node(Text::with_qualifiers(
-                                        (pos + 1, index.stop()),
-                                        TextQualifier::RAW,
-                                    ));
-                                    parent.insert_after(arena, c, t1_ref);
-                                    parent.insert_after(arena, t1_ref, t2_ref);
-                                    c.delete(arena);
-                                    c = t2_ref;
-                                    index = (pos + 1, index.stop()).into();
-                                    continue 'l;
+            let mut new_indices: TinyVec<text::Index> = TinyVec::empty();
+            let mut modified = false;
+            if let Some(indices) = as_kind_data!(arena, code_span, CodeSpan).indices() {
+                for mut index in indices.iter().copied() {
+                    let mut added = false;
+                    'l: loop {
+                        for (j, &pos) in lst[i].pos.iter().enumerate() {
+                            if index.start() <= pos && pos < index.stop() {
+                                modified = true;
+                                let t1: text::Index = (index.start(), pos).into();
+                                let t2: text::Index = (pos + 1, index.stop()).into();
+                                if j != 0 {
+                                    new_indices.pop();
                                 }
+                                new_indices.push(t1);
+                                new_indices.push(t2);
+                                added = true;
+                                index = (pos + 1, index.stop()).into();
+                                continue 'l;
                             }
-                            break;
                         }
+                        break;
+                    }
+                    if !added {
+                        new_indices.push(index);
                     }
                 }
-                c_opt = next;
+            }
+            if modified {
+                let parent = arena[code_span].parent().unwrap();
+                let new_code_span = arena.new_node(CodeSpan::from_indices(new_indices));
+                if let Some(pos) = arena[code_span].pos() {
+                    arena[new_code_span].set_pos(pos);
+                }
+                parent.replace_child(arena, code_span, new_code_span);
             }
         }
     }

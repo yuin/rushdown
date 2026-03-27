@@ -1387,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "rushdown"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bitflags 2.10.0",
  "comrak",

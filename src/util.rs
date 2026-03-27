@@ -1793,12 +1793,58 @@ impl<T> TinyVec<T> {
         }
     }
 
+    /// Removes and returns the last item in the TinyVec, or None if the TinyVec is empty.
+    pub fn pop(&mut self) -> Option<T> {
+        match &mut self.kind {
+            TinyVecKind::Empty => None,
+            TinyVecKind::Single(_) => {
+                let old = core::mem::replace(&mut self.kind, TinyVecKind::Collection(Vec::new()));
+                match old {
+                    TinyVecKind::Empty => unreachable!(),
+                    TinyVecKind::Single(v) => Some(v),
+                    TinyVecKind::Collection(_) => unreachable!(),
+                }
+            }
+            TinyVecKind::Collection(vs) => vs.pop(),
+        }
+    }
+
     /// Converts the TinyVec into a `Vec<T>`.
     pub fn into_vec(self) -> Vec<T> {
         match self.kind {
             TinyVecKind::Empty => Vec::new(),
             TinyVecKind::Single(v) => alloc::vec![v],
             TinyVecKind::Collection(vs) => vs,
+        }
+    }
+
+    /// Extends the TinyVec with the items from the given slice.
+    pub fn extend_from_slice(&mut self, slice: &[T])
+    where
+        T: Clone,
+    {
+        match &mut self.kind {
+            TinyVecKind::Empty => {
+                if slice.len() == 1 {
+                    self.kind = TinyVecKind::Single(slice[0].clone());
+                } else if !slice.is_empty() {
+                    self.kind = TinyVecKind::Collection(slice.to_vec());
+                }
+            }
+            TinyVecKind::Single(_) => {
+                let old = core::mem::replace(&mut self.kind, TinyVecKind::Collection(Vec::new()));
+                match old {
+                    TinyVecKind::Empty => unreachable!(),
+                    TinyVecKind::Single(v0) => {
+                        let mut new_vec = Vec::with_capacity(1 + slice.len());
+                        new_vec.push(v0);
+                        new_vec.extend_from_slice(slice);
+                        self.kind = TinyVecKind::Collection(new_vec);
+                    }
+                    TinyVecKind::Collection(_) => unreachable!(),
+                }
+            }
+            TinyVecKind::Collection(vs) => vs.extend_from_slice(slice),
         }
     }
 }

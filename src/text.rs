@@ -356,6 +356,12 @@ impl From<Value> for MultilineValue {
     }
 }
 
+impl From<TinyVec<Index>> for MultilineValue {
+    fn from(indices: TinyVec<Index>) -> Self {
+        MultilineValue::Indices(indices)
+    }
+}
+
 //   }}} MuiltineValue
 
 // }}} Value

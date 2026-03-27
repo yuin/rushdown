@@ -9,7 +9,7 @@ use crate::error::Error;
 use crate::renderer::BuiltinNodesRenderer as _;
 use crate::renderer::{self, *};
 use crate::util::{
-    escape_html, escape_url, has_suffix, try_escape_html_byte, try_resolve_entity_reference,
+    escape_html, escape_url, try_escape_html_byte, try_resolve_entity_reference,
     try_resolve_numeric_reference, try_unescape_punct, AsciiWordSet, EscapeUrlOptions,
     UnescapePunctResult,
 };
@@ -631,22 +631,18 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         if entering {
             let kd = as_kind_data!(arena, node_ref, Text);
-            if kd.has_qualifiers(TextQualifier::RAW) {
-                self.writer.raw_write(w, kd.str(source))?;
-            } else {
-                self.writer.write(w, kd.str(source))?;
-                if kd.has_qualifiers(TextQualifier::HARD_LINE_BREAK)
-                    || (kd.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
-                        && self.format_options.hard_wraps)
-                {
-                    if self.format_options.xhtml {
-                        self.writer.write_safe_str(w, "<br />\n")?;
-                    } else {
-                        self.writer.write_safe_str(w, "<br>\n")?;
-                    }
-                } else if kd.has_qualifiers(TextQualifier::SOFT_LINE_BREAK) {
-                    self.writer.write_newline(w)?;
+            self.writer.write(w, kd.str(source))?;
+            if kd.has_qualifiers(TextQualifier::HARD_LINE_BREAK)
+                || (kd.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
+                    && self.format_options.hard_wraps)
+            {
+                if self.format_options.xhtml {
+                    self.writer.write_safe_str(w, "<br />\n")?;
+                } else {
+                    self.writer.write_safe_str(w, "<br>\n")?;
                 }
+            } else if kd.has_qualifiers(TextQualifier::SOFT_LINE_BREAK) {
+                self.writer.write_newline(w)?;
             }
         }
         Ok(WalkStatus::Continue)
@@ -662,22 +658,11 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         _context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
+            let kd = as_kind_data!(arena, node_ref, CodeSpan);
             self.writer.write_safe_str(w, "<code")?;
             write_attributes!(arena, node_ref, source, w, self.format_options, code_span);
             self.writer.write_safe_str(w, ">")?;
-            for c in arena[node_ref].children(arena) {
-                let tkd = as_kind_data!(arena, c, Text);
-                let value = &tkd.bytes(source);
-                if has_suffix(value, b"\n") {
-                    self.writer.raw_write(w, unsafe {
-                        str::from_utf8_unchecked(&value[..value.len() - 1])
-                    })?;
-                    self.writer.write_safe_str(w, " ")?;
-                } else {
-                    self.writer
-                        .raw_write(w, unsafe { str::from_utf8_unchecked(value) })?;
-                }
-            }
+            self.writer.raw_write(w, &kd.value_str(source))?;
             return Ok(WalkStatus::SkipChildren);
         } else {
             self.writer.write_safe_str(w, "</code>")?;
@@ -717,8 +702,8 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         entering: bool,
         _context: &mut Context,
     ) -> Result<WalkStatus> {
+        let kd = as_kind_data!(arena, node_ref, Link);
         if entering {
-            let kd = as_kind_data!(arena, node_ref, Link);
             let mut dest = escape_url(
                 kd.destination().bytes(source),
                 &EscapeUrlOptions {
@@ -739,8 +724,20 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
             }
             write_attributes!(arena, node_ref, source, w, self.format_options, link);
             self.writer.write_safe_str(w, ">")?;
+            if matches!(kd.link_kind(), LinkKind::Auto(_)) {
+                if let Some(fc) = arena[node_ref].first_child() {
+                    if matches_kind!(arena, fc, Text) {
+                        let t = as_kind_data!(arena, fc, Text);
+                        self.writer.raw_write(w, t.str(source))?;
+                        self.writer.write_safe_str(w, "</a>")?;
+                    }
+                }
+                return Ok(WalkStatus::SkipChildren);
+            }
         } else {
-            self.writer.write_safe_str(w, "</a>")?;
+            if !matches!(kd.link_kind(), LinkKind::Auto(_)) {
+                self.writer.write_safe_str(w, "</a>")?;
+            }
         }
         Ok(WalkStatus::Continue)
     }
