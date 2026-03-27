@@ -1041,7 +1041,7 @@ impl Parser {
         let reg = self.context_key_registry.borrow();
         context.initialize(&reg);
 
-        let doc = arena.document();
+        let doc = arena.new_node(ast::Document::new());
         self.parse_blocks(&mut arena, doc, reader, context);
 
         let mut blocks = vec![];

@@ -600,8 +600,6 @@ pub struct Arena {
     free_indicies: Vec<usize>,
 
     id_seq: usize,
-
-    doc: Option<NodeRef>,
 }
 
 impl Default for Arena {
@@ -618,14 +616,11 @@ impl Arena {
 
     /// Creates a new arena with the specified options.
     pub fn with_options(options: ArenaOptions) -> Self {
-        let mut s = Self {
+        Self {
             arena: Vec::with_capacity(options.initial_size),
             free_indicies: Vec::with_capacity(options.initial_size / 16),
             id_seq: 0,
-            doc: None,
-        };
-        s.doc = Some(s.new_node(Document::default()));
-        s
+        }
     }
 
     /// Returns a Node for the given NodeRef.
@@ -654,12 +649,6 @@ impl Arena {
             .get_mut(id.cell)
             .and_then(|node| node.as_mut())
             .ok_or_else(|| Error::invalid_node_ref(id))
-    }
-
-    /// Returns the document node.
-    #[inline(always)]
-    pub fn document(&self) -> NodeRef {
-        self.doc.unwrap()
     }
 
     /// Creates a new node ref with the given data.
@@ -1213,6 +1202,19 @@ impl Node {
         match &self.kind_data() {
             KindData::Text(n) => n.index().map(|i| i.start()),
             _ => self.pos,
+        }
+    }
+
+    /// Returns the owner document of the node if available, otherwise returns None.
+    pub fn owner_document(&self, arena: &Arena) -> Option<NodeRef> {
+        let mut current = self.parent?;
+        while let Some(parent) = arena.get(current)?.parent {
+            current = parent;
+        }
+        if matches!(arena[current].kind_data(), KindData::Document(_)) {
+            Some(current)
+        } else {
+            None
         }
     }
 }

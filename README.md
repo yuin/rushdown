@@ -1,5 +1,5 @@
 # rushdown
-[![Tests](https://github.com/yuin/rushdown/actions/workflows/test.yml/badge.svg)](https://github.com/yuin/rushdown/actions/workflows/test.yml) [![Docs](https://docs.rs/rushdown/badge.svg)](https://docs.rs/rushdown) [![Crates.io](https://img.shields.io/crates/v/rushdown.svg?maxAge=2592000)](https://crates.io/crates/rushdown) ![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/yuin/3c122e76a86b680d04700e14b3161f04/raw/rushdown-coverage.json)
+[![Tests](https://github.com/yuin/rushdown/actions/workflows/test.yml/badge.svg)](https://github.com/yuin/rushdown/actions/workflows/test.yml) [![Docs](https://docs.rs/rushdown/badge.svg)](https://docs.rs/rushdown) [![Crates.io](https://img.shields.io/crates/v/rushdown.svg?maxAge=1800)](https://crates.io/crates/rushdown) ![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/yuin/3c122e76a86b680d04700e14b3161f04/raw/rushdown-coverage.json)
 
 A markdown parser written in Rust. Fast, Easy to extend, Standards-compliant.
 
