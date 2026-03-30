@@ -1253,7 +1253,6 @@ pub fn is_dangerous_url(url: &[u8]) -> bool {
 // ParagraphRenderer {{{
 
 /// Options for the paragraph renderer.
-#[derive(Default)]
 pub struct ParagraphRendererOptions<W: TextWrite = String> {
     /// A renderer function for task list item checkboxes.
     /// NodeRef provided is the parent of the paragraph node (the task list item).
@@ -1273,6 +1272,15 @@ pub struct ParagraphRendererOptions<W: TextWrite = String> {
 
     /// A function that determines whether a paragraph should be wrapped in `<p>` tags.
     pub should_wrap: Option<fn(&ast::Arena, ast::NodeRef) -> bool>,
+}
+
+impl<W: TextWrite> Default for ParagraphRendererOptions<W> {
+    fn default() -> Self {
+        Self {
+            render_task_list_item: None,
+            should_wrap: None,
+        }
+    }
 }
 
 impl<W: TextWrite> RendererOptions for ParagraphRendererOptions<W> {}
