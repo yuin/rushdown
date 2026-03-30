@@ -1271,14 +1271,15 @@ pub struct ParagraphRendererOptions<W: TextWrite = String> {
     >,
 
     /// A function that determines whether a paragraph should be wrapped in `<p>` tags.
-    pub should_wrap: Option<fn(&ast::Arena, ast::NodeRef) -> bool>,
+    /// If paragraph is in a tight block, it will not be wrapped in `<p>` tags.
+    pub is_in_tight_block: Option<fn(&ast::Arena, ast::NodeRef) -> bool>,
 }
 
 impl<W: TextWrite> Default for ParagraphRendererOptions<W> {
     fn default() -> Self {
         Self {
             render_task_list_item: None,
-            should_wrap: None,
+            is_in_tight_block: None,
         }
     }
 }
@@ -1297,7 +1298,7 @@ impl<W: TextWrite> ParagraphRenderer<W> {
     /// Creates a new `ParagraphRenderer` with the given HTML options and paragraph renderer
     /// options.
     pub fn with_options(html_opts: Options, options: ParagraphRendererOptions<W>) -> Self {
-        let should_wrap = options.should_wrap.unwrap_or(is_in_tight_list);
+        let should_wrap = options.is_in_tight_block.unwrap_or(is_in_tight_list);
         Self {
             writer: html::Writer::with_options(html_opts.clone()),
             format_options: html_opts,
