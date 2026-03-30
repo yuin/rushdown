@@ -1160,8 +1160,9 @@ pub fn render_attributes<W: TextWrite>(
     Ok(())
 }
 
+/// Returns true if the given node is a child of a tight list, otherwise false.
 #[inline(always)]
-fn is_in_tight_list(arena: &ast::Arena, node_ref: ast::NodeRef) -> bool {
+pub fn is_in_tight_list(arena: &ast::Arena, node_ref: ast::NodeRef) -> bool {
     if let Some(p) = arena[node_ref].parent() {
         if let Some(gp) = arena[p].parent() {
             if let KindData::List(list) = arena[gp].kind_data() {
@@ -1269,6 +1270,9 @@ pub struct ParagraphRendererOptions<W: TextWrite = String> {
             ) -> Result<()>,
         >,
     >,
+
+    /// A function that determines whether a paragraph should be wrapped in `<p>` tags.
+    pub should_wrap: Option<fn(&ast::Arena, ast::NodeRef) -> bool>,
 }
 
 impl<W: TextWrite> RendererOptions for ParagraphRendererOptions<W> {}
@@ -1278,28 +1282,36 @@ pub struct ParagraphRenderer<W: TextWrite = String> {
     writer: html::Writer,
     format_options: Options,
     options: ParagraphRendererOptions<W>,
+    should_wrap: fn(&ast::Arena, ast::NodeRef) -> bool,
 }
 
 impl<W: TextWrite> ParagraphRenderer<W> {
-    fn with_options(html_opts: Options, options: ParagraphRendererOptions<W>) -> Self {
+    /// Creates a new `ParagraphRenderer` with the given HTML options and paragraph renderer
+    /// options.
+    pub fn with_options(html_opts: Options, options: ParagraphRendererOptions<W>) -> Self {
+        let should_wrap = options.should_wrap.unwrap_or(is_in_tight_list);
         Self {
             writer: html::Writer::with_options(html_opts.clone()),
             format_options: html_opts,
             options,
+            should_wrap,
         }
     }
 
-    /// Returns a reference to the HTML writer used by this renderer.
-    pub fn writer(&self) -> &Writer {
+    /// Returns a reference to the internal HTML writer.
+    #[inline(always)]
+    pub fn writer(&self) -> &html::Writer {
         &self.writer
     }
 
-    /// Returns a reference to the HTML format options used by this renderer.
+    /// Returns a reference to the format options.
+    #[inline(always)]
     pub fn format_options(&self) -> &Options {
         &self.format_options
     }
 
-    /// Returns a reference to the paragraph renderer options used by this renderer.
+    /// Returns a reference to the paragraph renderer options.
+    #[inline(always)]
     pub fn options(&self) -> &ParagraphRendererOptions<W> {
         &self.options
     }
@@ -1316,8 +1328,8 @@ impl<W: TextWrite> RenderNode<W> for ParagraphRenderer<W> {
         context: &mut renderer::Context,
     ) -> Result<WalkStatus> {
         if entering {
-            let should_render = is_in_tight_list(arena, node_ref);
-            if !should_render {
+            let should_wrap = (self.should_wrap)(arena, node_ref);
+            if !should_wrap {
                 self.writer.write_safe_str(w, "<p")?;
                 write_attributes!(arena, node_ref, source, w, self.format_options, paragraph);
                 self.writer.write_safe_str(w, ">")?;
@@ -1353,7 +1365,7 @@ impl<W: TextWrite> RenderNode<W> for ParagraphRenderer<W> {
                 }
             }
         } else {
-            let opened = !is_in_tight_list(arena, node_ref);
+            let opened = !(self.should_wrap)(arena, node_ref);
             if !opened {
                 let n = &arena[node_ref];
                 if n.next_sibling().is_some() && n.first_child().is_some() {

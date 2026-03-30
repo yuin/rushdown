@@ -154,6 +154,7 @@ fn test_task_list_item_override() {
                     Ok(())
                 },
             )),
+            ..Default::default()
         }),
     );
     let source = r#"
