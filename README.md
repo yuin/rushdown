@@ -424,6 +424,7 @@ HtmlRenderer constructor function can take these arguments if needed, in any ord
 - [rushdown-highlighting](https://crates.io/crates/rushdown-highlighting): A syntax highlight extension for rushdown.
 - [rushdown-diagram](https://crates.io/crates/rushdown-diagram): A diagram visualization(e.g. MermaidJS) extension for rushdown.
 - [rushdown-fenced-div](https://github.com/growler/rushdown-fenced-div): Fenced div extension for rushdown markdown parser.
+- [rushdown-definition-list](https://crates.io/crates/rushdown-definition-list): A definition list extension for rushdown.
 
 ## Donation
 BTC: 1NEDSyUmo4SMTDP83JJQSWi1MvQUGGNMZB
