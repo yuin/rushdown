@@ -229,7 +229,7 @@ const SPACE_TABLE: [i8; 256] = [
 
 /// Returns true if the given character is a space, otherwise false.
 #[inline(always)]
-pub fn is_space(c: u8) -> bool {
+pub const fn is_space(c: u8) -> bool {
     SPACE_TABLE[c as usize] == 1
 }
 
@@ -246,7 +246,7 @@ const PUNCT_TABLE: [i8; 256] = [
 
 /// Returns true if the given character is a punctuation, otherwise false.
 #[inline(always)]
-pub fn is_punct(c: u8) -> bool {
+pub const fn is_punct(c: u8) -> bool {
     PUNCT_TABLE[c as usize] == 1
 }
 
@@ -326,8 +326,18 @@ pub fn trim_right_space(s: &[u8]) -> &[u8] {
 
 /// Returns true if `s` is empty or consists of only space characters.
 #[inline(always)]
-pub fn is_blank(s: &[u8]) -> bool {
-    s.is_empty() || s.iter().all(|&c| is_space(c))
+pub const fn is_blank(s: &[u8]) -> bool {
+    if s.is_empty() {
+        return true;
+    }
+    let mut i = 0;
+    while i < s.len() {
+        if !is_space(s[i]) {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 /// Returns true if `s` ends with the given suffix.
@@ -340,10 +350,12 @@ pub fn has_suffix(s: &[u8], suffix: &[u8]) -> bool {
 }
 
 /// Returns the indent width and the number of bytes consumed for `s`.
-pub fn indent_width(s: &[u8], current_pos: usize) -> (usize, usize) {
+pub const fn indent_width(s: &[u8], current_pos: usize) -> (usize, usize) {
     let mut width = 0;
     let mut pos = 0;
-    for &b in s {
+    let mut i = 0;
+    while i < s.len() {
+        let b = s[i];
         if b == b' ' {
             width += 1;
             pos += 1;
@@ -353,12 +365,13 @@ pub fn indent_width(s: &[u8], current_pos: usize) -> (usize, usize) {
         } else {
             break;
         }
+        i += 1;
     }
     (width, pos)
 }
 
 /// Returns the width of a tab at the given position.
-pub fn tab_width(current_pos: usize) -> usize {
+pub const fn tab_width(current_pos: usize) -> usize {
     4 - (current_pos % 4)
 }
 
@@ -375,14 +388,14 @@ pub fn tab_width(current_pos: usize) -> usize {
 /// width=2 is in the tab character. In this case, IndentPosition returns
 /// (pos=1, padding=2).
 #[inline]
-pub fn indent_position(s: &[u8], current_pos: usize, width: usize) -> Option<(usize, usize)> {
+pub const fn indent_position(s: &[u8], current_pos: usize, width: usize) -> Option<(usize, usize)> {
     indent_position_padding(s, current_pos, 0, width)
 }
 
 /// Searches an indent position with the given width for the given line.
 /// This function is mostly same as [`indent_position`] except this function
 /// takes account into additional paddings.
-pub fn indent_position_padding(
+pub const fn indent_position_padding(
     s: &[u8],
     current_pos: usize,
     padding: usize,
@@ -537,7 +550,7 @@ pub fn collapse_spaces<'a>(c: impl Into<Cow<'a, [u8]>>) -> Cow<'a, [u8]> {
 
 /// Returns the length of a UTF-8 sequence based on the first byte.
 #[inline]
-pub fn utf8_len(b0: u8) -> Option<usize> {
+pub const fn utf8_len(b0: u8) -> Option<usize> {
     if b0 < 0x80 {
         return Some(1);
     }
@@ -621,7 +634,7 @@ pub fn fold_case_full<'a>(c: impl Into<Cow<'a, [u8]>>) -> Cow<'a, [u8]> {
 
 /// Returns true if the given character is a Unicode space, otherwise false.
 /// Taken from [cmark](https://github.com/commonmark/cmark).
-pub fn is_unicode_space(c: char) -> bool {
+pub const fn is_unicode_space(c: char) -> bool {
     let uc = c as u32;
     uc == 9
         || uc == 10
@@ -630,7 +643,7 @@ pub fn is_unicode_space(c: char) -> bool {
         || uc == 32
         || uc == 160
         || uc == 5760
-        || (8192..=8202).contains(&uc)
+        || uc >= 8192 && uc <= 8202
         || uc == 8239
         || uc == 8287
         || uc == 12288
@@ -639,7 +652,7 @@ pub fn is_unicode_space(c: char) -> bool {
 /// Returns true if the given character is a Unicode symbol or punctuation, otherwise false.
 /// Taken from [cmark](https://github.com/commonmark/cmark).
 #[allow(clippy::all)]
-pub fn is_unicode_symbol_or_punct(c: char) -> bool {
+pub const fn is_unicode_symbol_or_punct(c: char) -> bool {
     let uc = c as u32;
     if uc < 128 {
         is_punct(c as u8)
@@ -1004,7 +1017,7 @@ const HTML_ESCAPE_TABLE: [Option<&str>; 256] = {
 /// Returns HTML escaped bytes if the given byte should be escaped,
 /// otherwise None.
 #[inline(always)]
-pub fn try_escape_html_byte(b: u8) -> Option<&'static str> {
+pub const fn try_escape_html_byte(b: u8) -> Option<&'static str> {
     HTML_ESCAPE_TABLE[b as usize]
 }
 
@@ -1350,7 +1363,7 @@ impl<T> Prioritized<T> {
 
     /// Returns a reference to the item.
     #[inline(always)]
-    pub fn item(&self) -> &T {
+    pub const fn item(&self) -> &T {
         self.item.as_ref().unwrap()
     }
 
@@ -1367,7 +1380,7 @@ impl<T> Prioritized<T> {
 
     /// Returns the priority.
     #[inline(always)]
-    pub fn priority(&self) -> u32 {
+    pub const fn priority(&self) -> u32 {
         self.priority
     }
 }
@@ -1421,12 +1434,12 @@ impl<V> StringMap<V> {
     }
 
     /// Returns the number of entries in the map.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Returns true if the map contains no entries.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
@@ -1684,7 +1697,7 @@ impl<T> TinyVec<T> {
     }
 
     /// Returns the number of items in the TinyVec.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         match &self.kind {
             TinyVecKind::Empty => 0,
             TinyVecKind::Single(_) => 1,
@@ -1693,7 +1706,7 @@ impl<T> TinyVec<T> {
     }
 
     /// Returns true if the TinyVec contains no items.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         match &self.kind {
             TinyVecKind::Empty => true,
             TinyVecKind::Single(_) => false,

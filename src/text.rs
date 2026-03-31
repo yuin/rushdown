@@ -53,7 +53,7 @@ impl Value {
     }
 
     /// Returns true if the value is empty, otherwise false.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         match self {
             Value::Index(index) => index.is_empty(),
             Value::String(s) => s.is_empty(),
@@ -61,7 +61,7 @@ impl Value {
     }
 
     /// Returns the length of the value.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         match self {
             Value::Index(index) => index.len(),
             Value::String(s) => s.len(),
@@ -178,7 +178,7 @@ impl Index {
 
     /// Returns true if the index is empty, otherwise false.
     #[inline(always)]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.start >= self.stop
     }
 
@@ -196,7 +196,7 @@ impl Index {
 
     /// Returns the length of the index.
     #[inline(always)]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.stop - self.start
     }
 }
@@ -496,15 +496,15 @@ impl<'a> Iterator for LinesIter<'a> {
 /// Each segment does not contain multiple lines.
 pub type Block = [Segment];
 
-fn binary_search_block_pos(block: &Block, pos: usize) -> Option<usize> {
+const fn binary_search_block_pos(block: &Block, pos: usize) -> Option<usize> {
     let mut left = 0;
     let mut right = block.len();
     while left < right {
         let mid = (left + right) / 2;
-        if block[mid].start() <= pos && pos < block[mid].stop() {
+        if block[mid].start <= pos && pos < block[mid].stop {
             return Some(mid);
         }
-        if pos < block[mid].start() {
+        if pos < block[mid].start {
             right = mid;
         } else {
             left = mid + 1;
@@ -663,8 +663,8 @@ impl Segment {
 
     /// Returns the length of the segment.
     #[inline(always)]
-    pub fn len(&self) -> usize {
-        self.stop - self.start + self.padding()
+    pub const fn len(&self) -> usize {
+        self.stop - self.start + self.padding as usize
     }
 
     /// Returns a segment between this segment and the given segment.
@@ -681,7 +681,7 @@ impl Segment {
 
     /// Returns true if this segment is empty, otherwise false.
     #[inline(always)]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.start >= self.stop && self.padding == 0
     }
 
