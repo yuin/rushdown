@@ -1,6 +1,19 @@
-/target
-profile*.svg
-profile.pb
-benches/cmark-master
-benches/cmark_benchmark*
-lcov.info
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, build with `go test -c`
+*.test
+*.pprof
+
+# Rust build artifacts
+pkg/
+target/
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+.DS_Store

@@ -1,0 +1,169 @@
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>rushdown playground</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="./playground.css">
+  <script type="module">
+    import init, { markdown_to_html, markdown_to_ast } from './rushdown_wasm.js';
+    const $ = (id) => document.getElementById(id);
+    const $$ = (q) => document.querySelector(q);
+    const rushdownVersion = "{{version}}";
+
+    const optionNames = [
+      "optTable",          
+      "optTaskListItem",   
+      "optStrikethrough",  
+      "optLinkify",        
+      "",                  // 4
+      "",                  // 5
+      "",                  // 6
+      "",                  // 7
+      "",                  // 8
+      "",                  // 9
+      "",                  // 10
+      "",                  // 11
+      "",                  // 12
+      "",                  // 13
+      "",                  // 14
+      "",                  // 15
+      "optUnsafe",
+    ];
+    const optionValue = function(name) {
+      return 1 << optionNames.indexOf(name);
+    };
+
+    const getOptions = function() {
+      let options = 0;
+      for(const optionName of optionNames) {
+      if(!optionName) continue;
+        if(document.getElementsByName(optionName)[0].checked) {
+          options |= optionValue(optionName);
+        }
+      }
+      return options;
+    };
+
+    const setOptions = function(value) {
+      value = !value ? 0 : parseInt(value);
+      for(const optionName of optionNames) {
+        if(optionValue(optionName) & value) {
+          document.getElementsByName(optionName)[0].checked = true;
+        }
+      }
+    };
+
+    window.convert = function() {
+      const inputElm = $('input');
+      const previewElm = $('preview');
+      const htmlElm= $$('#html pre');
+      const dumpElm= $$('#dump pre');
+      const permelinkElm = $('permalink')
+      const messageElm = $('message');
+  
+      messageElm.innerText = "";
+      const options = getOptions();
+      const html = markdown_to_html(inputElm.value, options);
+      previewElm.innerHTML = html;
+      htmlElm.innerText = html;
+      const ast = markdown_to_ast(inputElm.value, options);
+      dumpElm.innerText = ast;
+
+      const u = new URL(location.href);
+      u.searchParams.delete("m");
+      u.searchParams.set("m", encodeURIComponent(inputElm.value));
+      u.searchParams.set("o", getOptions());
+      u.searchParams.set("v", encodeURIComponent(rushdownVersion));
+      permelinkElm.href = u.href;
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      init().then(() => {
+        $("convert-markdown").disabled = false;
+        const u = new URL(location.href);
+        if(u.searchParams.has("m")) {
+          setOptions(u.searchParams.get("o"));
+          $("input").value = decodeURIComponent(u.searchParams.get("m"));
+          convert();
+        }
+        
+        if(u.searchParams.has("v")) {
+          const v = u.searchParams.get("v")
+          if(v !== rushdownVersion) {
+            $("message").innerHTML = "<div class=\"warn\">This link was created for rushdown@"+v+". Results may differ with this version.</div>";
+          }
+        }
+        
+        for(const pre of [...document.querySelectorAll('#container pre')]){
+          const button = document.createElement('button');
+          pre.parentNode.insertBefore(button, pre);
+          button.textContent = 'copy';
+          button.classList.add('pre-copy');
+          let timer;
+          button.addEventListener('click', () => {
+            const textarea = document.createElement('textarea');
+            pre.appendChild(textarea);
+            textarea.value = pre.innerText;
+            textarea.select();
+            document.execCommand('copy');
+            pre.removeChild(textarea);
+            button.textContent = 'copied';
+            clearTimeout(timer);
+            timer = setTimeout(() => {
+              button.textContent = 'copy';
+            }, 500);
+          });
+        }
+      });
+  
+    });
+
+  </script>
+</head>
+
+<body>
+<h1>rushdown@{{version}} playground</h1>
+<section id="message">
+</section>
+<div id="container">
+  <div id="markdown">
+    <div>
+      table:<input type="checkbox" name="optTable"/ >&nbsp;
+      strikethrough:<input type="checkbox" name="optStrikethrough"/ >&nbsp;
+      linkify:<input type="checkbox" name="optLinkify"/ >&nbsp;
+      tasklist:<input type="checkbox" name="optTaskListItem"/ >&nbsp;
+      unsafe:<input type="checkbox" name="optUnsafe"/ >&nbsp;
+    </div>
+    <div>
+      <a id="permalink" href="">permalink</a>&nbsp;&nbsp;&nbsp;
+      <span id="clear" onclick="$('input').value='';return false;">clear</span>
+    </div>
+    <div>
+      <textarea id="input" placeholder="markdown" rows="20"></textarea>
+    </div>
+    <div>
+      <button onClick="convert();" id="convert-markdown" disabled>Convert</button>
+    </div>
+  </div>
+  <div id="output">
+    <div id="tab-wrapper">
+      <input id="preview-tab" type="radio" name="tab" class="tab-switch" checked="checked" /><label class="tab-label" for="preview-tab">Preview</label>
+      <input id="html-tab" type="radio" name="tab" class="tab-switch" /><label class="tab-label" for="html-tab">HTML</label>
+      <input id="dump-tab" type="radio" name="tab" class="tab-switch" /><label class="tab-label" for="dump-tab">AST</label>
+      <div id="tabs" class="tabs">
+        <div class="tab-content" id="preview">
+        </div>
+        <div class="tab-content" id="html">
+          <pre></pre>
+        </div>
+        <div class="tab-content" id="dump">
+          <pre></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
+
