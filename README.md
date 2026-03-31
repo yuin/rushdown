@@ -5,6 +5,8 @@ A markdown parser written in Rust. Fast, Easy to extend, Standards-compliant.
 
 rushdown is compliant with CommonMark 0.31.2 & [GitHub Flavored Markdown](https://github.github.com/gfm/)[^gfm-support].
 
+- [rushdown playground](https://yuin.github.io/rushdown/playground/) : Try rushdown online
+
 [^gfm-support]: rushdown does not support [Disallowed Raw HTML](https://github.github.com/gfm/#disallowed-raw-html-extension-). 
 
 ## Motivation
