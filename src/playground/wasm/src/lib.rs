@@ -2,8 +2,8 @@ use rushdown::{
     ast::pretty_print,
     new_markdown_to_html,
     parser::{
-        self, EmptyParserExtension, LinkifyOptions, Parser, ParserExtension, ParserExtensionFn,
-        gfm_linkify, gfm_strikethrough, gfm_table, gfm_task_list_item,
+        self, LinkifyOptions, Parser, ParserExtension, empty_parser_extension, gfm_linkify,
+        gfm_strikethrough, gfm_table, gfm_task_list_item, parser_extension,
     },
     renderer::html,
     text::BasicReader,
@@ -50,25 +50,25 @@ fn to_html_renderer_options(options: i32) -> html::Options {
 }
 
 fn to_parser_extension(options: i32) -> impl ParserExtension {
-    let pext = EmptyParserExtension::new();
-    let pext = pext.and(ParserExtensionFn::new(move |p: &mut Parser| {
-        if options & OPT_TABLE != 0 {
-            gfm_table().apply(p)
-        }
-    }));
-    let pext = pext.and(ParserExtensionFn::new(move |p: &mut Parser| {
-        if options & OPT_TASK_LIST_ITEM != 0 {
-            gfm_task_list_item().apply(p)
-        }
-    }));
-    let pext = pext.and(ParserExtensionFn::new(move |p: &mut Parser| {
-        if options & OPT_STRIKETHROUGH != 0 {
-            gfm_strikethrough().apply(p)
-        }
-    }));
-    pext.and(ParserExtensionFn::new(move |p: &mut Parser| {
-        if options & OPT_LINKIFY != 0 {
-            gfm_linkify(LinkifyOptions::default()).apply(p)
-        }
-    }))
+    empty_parser_extension()
+        .and(parser_extension(move |p| {
+            if options & OPT_TABLE != 0 {
+                gfm_table().apply(p)
+            }
+        }))
+        .and(parser_extension(move |p| {
+            if options & OPT_TASK_LIST_ITEM != 0 {
+                gfm_task_list_item().apply(p)
+            }
+        }))
+        .and(parser_extension(move |p| {
+            if options & OPT_STRIKETHROUGH != 0 {
+                gfm_strikethrough().apply(p)
+            }
+        }))
+        .and(parser_extension(move |p| {
+            if options & OPT_LINKIFY != 0 {
+                gfm_linkify(LinkifyOptions::default()).apply(p)
+            }
+        }))
 }
