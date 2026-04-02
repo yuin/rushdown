@@ -853,6 +853,11 @@ impl EmptyRendererExtension {
     }
 }
 
+/// Creates an empty renderer extension.
+pub fn empty_renderer_extension() -> EmptyRendererExtension {
+    EmptyRendererExtension::new()
+}
+
 impl<'r, W: TextWrite> RendererExtension<'r, W> for EmptyRendererExtension {
     fn apply(self, _renderer: &mut Renderer<'r, W>) {}
 }
@@ -881,6 +886,15 @@ where
 /// A renderer extension defined by a closure.
 pub struct RendererExtensionFn<T> {
     f: T,
+}
+
+/// Creates a renderer extension from a closure.
+pub fn renderer_extension<'r, W, T>(f: T) -> RendererExtensionFn<T>
+where
+    W: TextWrite + 'r,
+    T: FnOnce(&mut Renderer<'r, W>),
+{
+    RendererExtensionFn::new(f)
 }
 
 impl<T> RendererExtensionFn<T> {

@@ -150,6 +150,42 @@ match markdown_to_html(&mut output, input) {
 }
 ```
 
+You can use subset of the GFM extensions conditionally:
+
+```rust
+use core::fmt::Write;
+use rushdown::{
+    new_markdown_to_html,
+    parser::{self, empty_parser_extension, parser_extension, ParserExtension},
+    renderer::html::{self, RendererExtension},
+    Result,
+};
+
+let ext = empty_parser_extension()
+    .and(parser_extension(|p| {
+        if true { // conditionally apply gfm_table extension
+            parser::gfm_table().apply(p)
+        }
+     }));
+
+let markdown_to_html = new_markdown_to_html(
+    parser::Options::default(),
+    html::Options::default(),
+    ext,
+    html::NO_EXTENSIONS,
+);
+let mut output = String::new();
+let input = "# Hello, World!\n\nThis is a **Markdown** document.";
+match markdown_to_html(&mut output, input) {
+    Ok(_) => {
+        println!("HTML output:\n{}", output);
+    }
+    Err(e) => {
+        println!("Error: {:?}", e);
+    }
+}
+```
+
 
 ### Parser options
 

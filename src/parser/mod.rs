@@ -752,6 +752,11 @@ impl EmptyParserExtension {
     }
 }
 
+/// Creates an empty parser extension.
+pub fn empty_parser_extension() -> EmptyParserExtension {
+    EmptyParserExtension::new()
+}
+
 impl ParserExtension for EmptyParserExtension {
     fn apply(self, _parser: &mut Parser) {}
 }
@@ -775,6 +780,11 @@ impl<T: ParserExtension, U: ParserExtension> ParserExtension for ChainedParserEx
 /// A parser extension defined by a closure.
 pub struct ParserExtensionFn<T: FnOnce(&mut Parser)> {
     f: T,
+}
+
+/// Creates a parser extension from a closure.
+pub fn parser_extension<T: FnOnce(&mut Parser)>(f: T) -> ParserExtensionFn<T> {
+    ParserExtensionFn { f }
 }
 
 impl<T: FnOnce(&mut Parser)> ParserExtensionFn<T> {
