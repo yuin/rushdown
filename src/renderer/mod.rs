@@ -54,6 +54,8 @@ pub struct Context {
     base: context::Context,
 
     task: Option<Task>,
+
+    pblock: Vec<bool>,
 }
 
 impl Default for Context {
@@ -68,6 +70,7 @@ impl Context {
         Context {
             base: context::Context::new(),
             task: None,
+            pblock: Vec::with_capacity(16),
         }
     }
 
@@ -103,6 +106,14 @@ impl Context {
 
     fn set_task(&mut self, task: Option<Task>) {
         self.task = task;
+    }
+
+    fn push_pblock(&mut self, value: bool) {
+        self.pblock.push(value);
+    }
+
+    fn pop_pblock(&mut self) -> Option<bool> {
+        self.pblock.pop()
     }
 }
 // }}} Context

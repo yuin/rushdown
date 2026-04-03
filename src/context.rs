@@ -65,7 +65,7 @@ pub trait AnyValueSpec {
 #[derive(Debug)]
 pub struct ContextKey<T: AnyValueSpec> {
     key: usize,
-    _marker: core::marker::PhantomData<T>,
+    _marker: core::marker::PhantomData<*const T>,
 }
 
 impl<T: AnyValueSpec> Copy for ContextKey<T> {}

@@ -260,12 +260,7 @@ let markdown_to_html = new_markdown_to_html_string(
     parser::gfm(GfmOptions::default()),
     html::paragraph_renderer(html::ParagraphRendererOptions {
         render_task_list_item: Some(Box::new(
-            |w: &mut String,
-             pr: &html::ParagraphRenderer<String>,
-             source: &str,
-             arena: &ast::Arena,
-             node_ref: ast::NodeRef,
-             ctx: &mut renderer::Context| {
+            |w, source, arena, node_ref, ctx, pctx| {
                 // do stuff
                 Ok(())
             },
@@ -418,7 +413,7 @@ You can add parsers and renderers like the following:
 
 ```text
 fn user_mention_parser_extension() -> impl ParserExtension {
-    ParserExtensionFn::new(|p: &mut Parser| {
+    parser_extension(|p| {
         p.add_inline_parser(
             UserMentionParser::new,
             NoParserOptions, // no options for this parser
@@ -433,7 +428,7 @@ fn user_mention_html_renderer_extension<'cb, W>(
 where
     W: TextWrite + 'cb,
 {
-    RendererExtensionFn::new(move |r: &mut Renderer<'cb, W>| {
+    renderer_extension(move |r| {
         r.add_node_renderer(UserMentionHtmlRenderer::with_options, options);
     })
 }

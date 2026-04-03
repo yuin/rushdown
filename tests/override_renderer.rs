@@ -3,9 +3,8 @@ extern crate alloc;
 use alloc::string::String;
 use rushdown::new_markdown_to_html;
 use rushdown::parser;
-use rushdown::renderer::html::Renderer;
+use rushdown::renderer::html::renderer_extension;
 use rushdown::renderer::html::RendererExtension;
-use rushdown::renderer::html::RendererExtensionFn;
 
 use core::any::TypeId;
 
@@ -18,7 +17,7 @@ use rushdown::println;
 
 #[allow(dead_code)]
 struct CustomParagraphRenderer<W: TextWrite> {
-    _phantom: core::marker::PhantomData<W>,
+    _phantom: core::marker::PhantomData<*const W>,
     writer: html::Writer,
 }
 
@@ -64,7 +63,7 @@ fn custom_paragraph_renderer<'r, W>() -> impl RendererExtension<'r, W>
 where
     W: TextWrite + 'r,
 {
-    RendererExtensionFn::new(move |r: &mut Renderer<'r, W>| {
+    renderer_extension(|r| {
         r.add_node_renderer(
             CustomParagraphRenderer::with_html_options,
             NoRendererOptions,

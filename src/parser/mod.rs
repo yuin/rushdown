@@ -753,8 +753,8 @@ impl EmptyParserExtension {
 }
 
 /// Creates an empty parser extension.
-pub fn empty_parser_extension() -> EmptyParserExtension {
-    EmptyParserExtension::new()
+pub const fn empty_parser_extension() -> EmptyParserExtension {
+    EmptyParserExtension {}
 }
 
 impl ParserExtension for EmptyParserExtension {
@@ -783,7 +783,7 @@ pub struct ParserExtensionFn<T: FnOnce(&mut Parser)> {
 }
 
 /// Creates a parser extension from a closure.
-pub fn parser_extension<T: FnOnce(&mut Parser)>(f: T) -> ParserExtensionFn<T> {
+pub const fn parser_extension<T: FnOnce(&mut Parser)>(f: T) -> ParserExtensionFn<T> {
     ParserExtensionFn { f }
 }
 
@@ -2409,7 +2409,7 @@ struct ParseStack<S: ParseStackElemSpec> {
     bottom: Option<ParseStackElemRef>,
     top: Option<ParseStackElemRef>,
     elements: Vec<Option<ParseStackElem>>,
-    _spec: PhantomData<S>,
+    _spec: PhantomData<*const S>,
 }
 
 impl<S: ParseStackElemSpec> Default for ParseStack<S> {

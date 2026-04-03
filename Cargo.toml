@@ -1,6 +1,6 @@
 [package]
 name = "rushdown"
-version = "0.16.4"
+version = "0.17.0"
 authors = ["Yusuke Inuzuka <yuin@inforno.net>"]
 edition = "2021"
 rust-version = "1.87"
@@ -27,8 +27,8 @@ panic = 'abort'
 
 [features]
 default = ["std", "html-entities"]
-std = []
-alloc = []
+std = ["dep:memchr", "memchr/std"]
+alloc = ["dep:memchr", "memchr/alloc"]
 html-entities = []
 hashbrown = ["dep:hashbrown"]
 no-std = ["alloc", "hashbrown"]
@@ -41,7 +41,7 @@ hashbrown = { version = "0.15.2", optional = true}
 libc = { version = "0.2", default-features = false, optional = true }
 bitflags = "2.9.3"
 # TODO: move to core::slice::memchr if it reaches stable
-memchr = { version = "2", default-features = false }
+memchr = { version = "2", default-features = false, optional = true }
 phf = { version = "0.13.1", default-features = false }
 pprof = { version = "0.15", features = ["criterion", "protobuf", "flamegraph", "prost-codec"], optional = true }
 

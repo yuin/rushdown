@@ -198,7 +198,7 @@ macro_rules! write_attributes {
 pub struct BuiltinNodesRenderer<W: TextWrite = String> {
     format_options: Options,
     writer: Writer,
-    _phantom: core::marker::PhantomData<W>,
+    _phantom: core::marker::PhantomData<*const W>,
 }
 
 impl<W: TextWrite> BuiltinNodesRenderer<W> {
@@ -253,8 +253,9 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
-            let should_open = !is_in_tight_list(arena, node_ref);
-            if should_open {
+            let render_p = !is_in_tight_list(arena, node_ref);
+            context.push_pblock(render_p);
+            if render_p {
                 self.writer.write_safe_str(w, "<p")?;
                 write_attributes!(arena, node_ref, source, w, self.format_options, paragraph);
                 self.writer.write_safe_str(w, ">")?;
@@ -279,14 +280,14 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
                 }
             }
         } else {
-            let opened = !is_in_tight_list(arena, node_ref);
-            if !opened {
+            let render_p = context.pop_pblock().unwrap_or(false);
+            if render_p {
+                self.writer.write_safe_str(w, "</p>\n")?;
+            } else {
                 let n = &arena[node_ref];
                 if n.next_sibling().is_some() && n.first_child().is_some() {
                     self.writer.write_newline(w)?;
                 }
-            } else {
-                self.writer.write_safe_str(w, "</p>\n")?;
             }
         }
         Ok(WalkStatus::Continue)
@@ -854,8 +855,8 @@ impl EmptyRendererExtension {
 }
 
 /// Creates an empty renderer extension.
-pub fn empty_renderer_extension() -> EmptyRendererExtension {
-    EmptyRendererExtension::new()
+pub const fn empty_renderer_extension() -> EmptyRendererExtension {
+    EmptyRendererExtension {}
 }
 
 impl<'r, W: TextWrite> RendererExtension<'r, W> for EmptyRendererExtension {
@@ -889,12 +890,12 @@ pub struct RendererExtensionFn<T> {
 }
 
 /// Creates a renderer extension from a closure.
-pub fn renderer_extension<'r, W, T>(f: T) -> RendererExtensionFn<T>
+pub const fn renderer_extension<'r, W, T>(f: T) -> RendererExtensionFn<T>
 where
     W: TextWrite + 'r,
     T: FnOnce(&mut Renderer<'r, W>),
 {
-    RendererExtensionFn::new(f)
+    RendererExtensionFn { f }
 }
 
 impl<T> RendererExtensionFn<T> {
@@ -1030,7 +1031,7 @@ impl Writer {
     /// - backslash escaped characters
     /// - replacing insecure HTML characters(null characters)
     /// - replacing HTML entities(`<`, `>`, `&`, `"`, `'`, and so on)
-    pub fn write<W: TextWrite>(&self, w: &mut W, s: &str) -> Result<()> {
+    pub fn write<W: TextWrite + ?Sized>(&self, w: &mut W, s: &str) -> Result<()> {
         let bytes = s.as_bytes();
         let mut i = 0usize;
 
@@ -1084,7 +1085,7 @@ impl Writer {
     ///
     /// - replacing insecure HTML characters(null characters)
     /// - replacing HTML entities(`<`, `>`, `&`, `"`, `'`, and so on)
-    pub fn raw_write<W: TextWrite>(&self, w: &mut W, s: &str) -> Result<()> {
+    pub fn raw_write<W: TextWrite + ?Sized>(&self, w: &mut W, s: &str) -> Result<()> {
         let bytes = s.as_bytes();
         let mut n = 0;
 
@@ -1108,7 +1109,7 @@ impl Writer {
     /// Writes the given `s` to `w` with:
     ///
     /// - replacing insecure HTML characters(null characters)
-    pub fn write_html<W: TextWrite>(&self, w: &mut W, s: &str) -> Result<()> {
+    pub fn write_html<W: TextWrite + ?Sized>(&self, w: &mut W, s: &str) -> Result<()> {
         let bytes = s.as_bytes();
         let mut i = 0;
 
@@ -1132,13 +1133,13 @@ impl Writer {
     /// This function does not perform any escaping or processing.
     /// So use this only for safe strings.
     #[inline(always)]
-    pub fn write_safe_str<W: TextWrite, S: SafeStr>(&self, w: &mut W, s: S) -> Result<()> {
+    pub fn write_safe_str<W: TextWrite + ?Sized, S: SafeStr>(&self, w: &mut W, s: S) -> Result<()> {
         w.write_str(s.as_str())
     }
 
     /// Writes a newline.
     #[inline(always)]
-    pub fn write_newline<W: TextWrite>(&self, w: &mut W) -> Result<()> {
+    pub fn write_newline<W: TextWrite + ?Sized>(&self, w: &mut W) -> Result<()> {
         w.write_char('\n')
     }
 }
@@ -1215,7 +1216,7 @@ impl<'a> SafeStr for SafeBytes<'a> {
 }
 
 #[inline]
-fn write_bytes<W: TextWrite>(w: &mut W, bytes: &[u8]) -> Result<()> {
+fn write_bytes<W: TextWrite + ?Sized>(w: &mut W, bytes: &[u8]) -> Result<()> {
     unsafe {
         w.write_str(core::str::from_utf8_unchecked(bytes))
             .map_err(|e| Error::io("Failed to write bytes", Some(Box::new(e))))
@@ -1266,58 +1267,23 @@ pub fn is_dangerous_url(url: &[u8]) -> bool {
 
 // ParagraphRenderer {{{
 
-/// Options for the paragraph renderer.
-pub struct ParagraphRendererOptions<W: TextWrite = String> {
-    /// A renderer function for task list item checkboxes.
-    /// NodeRef provided is the parent of the paragraph node (the task list item).
-    #[allow(clippy::type_complexity)]
-    pub render_task_list_item: Option<
-        Box<
-            dyn Fn(
-                &mut W,
-                &ParagraphRenderer<W>,
-                &str,
-                &ast::Arena,
-                ast::NodeRef,
-                &mut Context,
-            ) -> Result<()>,
-        >,
-    >,
-
-    /// A function that determines whether a paragraph should be wrapped in `<p>` tags.
-    /// If paragraph is in a tight block, it will not be wrapped in `<p>` tags.
-    pub is_in_tight_block: Option<fn(&ast::Arena, ast::NodeRef) -> bool>,
-}
-
-impl<W: TextWrite> Default for ParagraphRendererOptions<W> {
-    fn default() -> Self {
-        Self {
-            render_task_list_item: None,
-            is_in_tight_block: None,
-        }
-    }
-}
-
-impl<W: TextWrite> RendererOptions for ParagraphRendererOptions<W> {}
-
-/// A renderer for paragraph nodes.
-pub struct ParagraphRenderer<W: TextWrite = String> {
+/// Context for the paragraph renderer, containing the HTML writer, format options, and paragraph
+pub struct ParagraphRendererContext {
     writer: html::Writer,
     format_options: Options,
-    options: ParagraphRendererOptions<W>,
-    should_wrap: fn(&ast::Arena, ast::NodeRef) -> bool,
+    options: ParagraphRendererOptions,
 }
 
-impl<W: TextWrite> ParagraphRenderer<W> {
-    /// Creates a new `ParagraphRenderer` with the given HTML options and paragraph renderer
-    /// options.
-    pub fn with_options(html_opts: Options, options: ParagraphRendererOptions<W>) -> Self {
-        let should_wrap = options.is_in_tight_block.unwrap_or(is_in_tight_list);
+impl ParagraphRendererContext {
+    fn new(
+        writer: html::Writer,
+        format_options: Options,
+        options: ParagraphRendererOptions,
+    ) -> Self {
         Self {
-            writer: html::Writer::with_options(html_opts.clone()),
-            format_options: html_opts,
+            writer,
+            format_options,
             options,
-            should_wrap,
         }
     }
 
@@ -1335,8 +1301,58 @@ impl<W: TextWrite> ParagraphRenderer<W> {
 
     /// Returns a reference to the paragraph renderer options.
     #[inline(always)]
-    pub fn options(&self) -> &ParagraphRendererOptions<W> {
+    pub fn options(&self) -> &ParagraphRendererOptions {
         &self.options
+    }
+}
+
+/// Options for the paragraph renderer.
+#[derive(Default)]
+pub struct ParagraphRendererOptions {
+    /// A renderer function for task list item checkboxes.
+    /// NodeRef provided is the parent of the paragraph node (the task list item).
+    #[allow(clippy::type_complexity)]
+    pub render_task_list_item: Option<
+        Box<
+            dyn Fn(
+                &mut dyn TextWrite,
+                &str,
+                &ast::Arena,
+                ast::NodeRef,
+                &mut Context,
+                &ParagraphRendererContext,
+            ) -> Result<()>,
+        >,
+    >,
+
+    /// A function that determines whether a paragraph should be wrapped in `<p>` tags.
+    /// If paragraph is in a tight block, it will not be wrapped in `<p>` tags.
+    pub is_in_tight_block: Option<fn(&ast::Arena, ast::NodeRef) -> bool>,
+}
+
+impl RendererOptions for ParagraphRendererOptions {}
+
+/// A renderer for paragraph nodes.
+pub struct ParagraphRenderer<W: TextWrite = String> {
+    _phantom: core::marker::PhantomData<*const W>,
+    ctx: ParagraphRendererContext,
+    is_in_tight_block: fn(&ast::Arena, ast::NodeRef) -> bool,
+}
+
+impl<W: TextWrite> ParagraphRenderer<W> {
+    /// Creates a new `ParagraphRenderer` with the given HTML options and paragraph renderer
+    /// options.
+    pub fn with_options(html_opts: Options, options: ParagraphRendererOptions) -> Self {
+        let is_in_tight_block = options.is_in_tight_block.unwrap_or(is_in_tight_list);
+        Self {
+            _phantom: core::marker::PhantomData,
+            ctx: ParagraphRendererContext::new(
+                html::Writer::with_options(html_opts.clone()),
+                html_opts,
+                options,
+            ),
+            is_in_tight_block,
+        }
     }
 }
 
@@ -1351,51 +1367,60 @@ impl<W: TextWrite> RenderNode<W> for ParagraphRenderer<W> {
         context: &mut renderer::Context,
     ) -> Result<WalkStatus> {
         if entering {
-            let should_wrap = (self.should_wrap)(arena, node_ref);
-            if !should_wrap {
-                self.writer.write_safe_str(w, "<p")?;
-                write_attributes!(arena, node_ref, source, w, self.format_options, paragraph);
-                self.writer.write_safe_str(w, ">")?;
+            let render_p = !(self.is_in_tight_block)(arena, node_ref);
+            context.push_pblock(render_p);
+            if render_p {
+                self.ctx.writer.write_safe_str(w, "<p")?;
+                write_attributes!(
+                    arena,
+                    node_ref,
+                    source,
+                    w,
+                    self.ctx.format_options,
+                    paragraph
+                );
+                self.ctx.writer.write_safe_str(w, ">")?;
             }
             if let Some(task) = context.pop_task() {
-                if let Some(ref r) = self.options.render_task_list_item {
+                if let Some(ref r) = self.ctx.options.render_task_list_item {
                     r(
                         w,
-                        self,
                         source,
                         arena,
                         arena[node_ref].parent().unwrap(),
                         context,
+                        &self.ctx,
                     )?;
                 } else {
                     match task {
                         Task::Checked => {
-                            self.writer.write_safe_str(
+                            self.ctx.writer.write_safe_str(
                                 w,
                                 r#"<input checked="" disabled="" type="checkbox""#,
                             )?;
                         }
                         Task::Unchecked => {
-                            self.writer
+                            self.ctx
+                                .writer
                                 .write_safe_str(w, r#"<input disabled="" type="checkbox""#)?;
                         }
                     }
-                    if self.format_options.xhtml {
-                        self.writer.write_safe_str(w, " /> ")?;
+                    if self.ctx.format_options.xhtml {
+                        self.ctx.writer.write_safe_str(w, " /> ")?;
                     } else {
-                        self.writer.write_safe_str(w, "> ")?;
+                        self.ctx.writer.write_safe_str(w, "> ")?;
                     }
                 }
             }
         } else {
-            let opened = !(self.should_wrap)(arena, node_ref);
-            if !opened {
+            let render_p = context.pop_pblock().unwrap_or(false);
+            if render_p {
+                self.ctx.writer.write_safe_str(w, "</p>\n")?;
+            } else {
                 let n = &arena[node_ref];
                 if n.next_sibling().is_some() && n.first_child().is_some() {
-                    self.writer.write_newline(w)?;
+                    self.ctx.writer.write_newline(w)?;
                 }
-            } else {
-                self.writer.write_safe_str(w, "</p>\n")?;
             }
         }
         Ok(WalkStatus::Continue)
@@ -1413,12 +1438,12 @@ where
 
 /// Creates a paragraph renderer with the given options.
 pub fn paragraph_renderer<'r, W>(
-    options: impl Into<ParagraphRendererOptions<W>>,
+    options: impl Into<ParagraphRendererOptions>,
 ) -> impl RendererExtension<'r, W>
 where
     W: TextWrite + 'r,
 {
-    RendererExtensionFn::new(move |r: &mut Renderer<'r, W>| {
+    renderer_extension(move |r| {
         r.add_node_renderer(ParagraphRenderer::with_options, options.into());
     })
 }

@@ -3,7 +3,7 @@ extern crate alloc;
 use core::any::TypeId;
 use core::fmt::{self, Write};
 
-use rushdown::renderer::html::{Options, Renderer, RendererExtension, RendererExtensionFn};
+use rushdown::renderer::html::{renderer_extension, Options, RendererExtension};
 use rushdown::Result;
 use rushdown::{as_extension_data, as_type_data, ast, text::*};
 use rushdown::{ast::*, text};
@@ -164,7 +164,7 @@ where
 }
 
 fn user_mention_parser_extension() -> impl ParserExtension {
-    ParserExtensionFn::new(|p: &mut Parser| {
+    parser_extension(|p| {
         p.add_inline_parser(
             UserMentionParser::new,
             NoParserOptions,
@@ -179,7 +179,7 @@ fn user_mention_html_renderer_extension<'cb, W>(
 where
     W: TextWrite + 'cb,
 {
-    RendererExtensionFn::new(move |r: &mut Renderer<'cb, W>| {
+    renderer_extension(move |r| {
         r.add_node_renderer(UserMentionHtmlRenderer::with_options, options);
     })
 }
@@ -394,7 +394,7 @@ where
 }
 
 fn adomonition_parser_extension(opts: impl Into<AdmonitionParserOptions>) -> impl ParserExtension {
-    ParserExtensionFn::new(|p: &mut Parser| {
+    parser_extension(|p| {
         p.add_ast_transformer(AdmonitionAstTransformer::with_options, opts.into(), 100);
     })
 }
@@ -405,7 +405,7 @@ fn adomonition_html_renderer_extension<'cb, W>(
 where
     W: TextWrite + 'cb,
 {
-    RendererExtensionFn::new(move |r: &mut Renderer<'cb, W>| {
+    renderer_extension(move |r| {
         r.add_node_renderer(AdmonitionHtmlRenderer::with_options, options.into());
     })
 }
@@ -495,7 +495,7 @@ fn header_footer_html_renderer_extension<'cb, W>(
 where
     W: TextWrite + 'cb,
 {
-    RendererExtensionFn::new(move |r: &mut Renderer<'cb, W>| {
+    renderer_extension(|r| {
         let options = options.into();
         r.add_pre_render_hook(HeaderPreRenderHook::with_options, options.clone(), 0);
         r.add_post_render_hook(
