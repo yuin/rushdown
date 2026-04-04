@@ -75,3 +75,16 @@ Title1 {#id_1 .class-1}
 //- - - - - - - - -//
 <h1 id="id-foo_bar:baz.qux" class="foobar">Test</h1>
 //= = = = = = = = = = = = = = = = = = = = = = = =//
+
+7
+//- - - - - - - - -//
+[link](https://example.com){#link .primary}
+
+![img](https://example.com/image.png){#hero .wide}
+
+Inline ![img](https://example.com/image.png) {#cat height=.8em}
+//- - - - - - - - -//
+<p><a href="https://example.com" id="link" class="primary">link</a></p>
+<p><img src="https://example.com/image.png" alt="img" id="hero" class="wide" /></p>
+<p>Inline <img src="https://example.com/image.png" alt="img" id="cat" height=".8em" /></p>
+//= = = = = = = = = = = = = = = = = = = = = = = =//
