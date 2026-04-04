@@ -1,7 +1,8 @@
 extern crate alloc;
-use crate::ast::{Arena, Image, Link, LinkReferenceKind, NodeRef, Text, TextQualifier};
+use crate::ast::{Arena, Attributes, Image, Link, LinkReferenceKind, NodeRef, Text, TextQualifier};
 use crate::parser::{
-    process_delimiters, Context, InlineParser, LinkLabel, ParseStackElemData, ParseStackElemRef,
+    parse_attributes, process_delimiters, Context, InlineParser, LinkLabel, Options,
+    ParseStackElemData, ParseStackElemRef,
 };
 use crate::text::{self, Reader, Segment, EOS};
 use crate::util::{is_blank, is_punct, is_space, to_link_reference};
@@ -10,12 +11,16 @@ use alloc::string::String;
 
 /// [`InlineParser`] for links.
 #[derive(Debug, Default)]
-pub struct LinkParser {}
+pub struct LinkParser {
+    attributes: bool,
+}
 
 impl LinkParser {
     /// Returns a new [`LinkParser`].
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(options: Options) -> Self {
+        Self {
+            attributes: options.attributes,
+        }
     }
 }
 
@@ -78,10 +83,14 @@ impl InlineParser for LinkParser {
         let c = reader.peek_byte();
         let (l, pos) = reader.position();
         let mut link_opt: Option<Link> = None;
+        let mut attrs_opt: Option<Attributes> = None;
 
         // normal link
         if c == b'(' {
             link_opt = parse_link(reader);
+            if self.attributes && link_opt.is_some() {
+                attrs_opt = parse_link_attributes(reader);
+            }
         // reference link
         } else if c == b'[' {
             link_opt = parse_reference_link(arena, reader, last_link_label_ref, ctx);
@@ -137,6 +146,9 @@ impl InlineParser for LinkParser {
         } else {
             arena.new_node(link)
         };
+        if let Some(attrs) = attrs_opt {
+            arena[link_ref].attributes_mut().extend(attrs);
+        }
         if let Some(p) = arena[ctx.link_labels().elem(last_link_label_ref).node_ref].pos() {
             arena[link_ref].set_pos(p);
         }
@@ -280,6 +292,18 @@ fn parse_link(reader: &mut text::BlockReader) -> Option<Link> {
         Some(t) => Link::inline_with_title(destination, t),
         None => Link::inline(destination),
     })
+}
+
+fn parse_link_attributes(reader: &mut text::BlockReader) -> Option<Attributes> {
+    let (line, _) = reader.peek_line_bytes()?;
+    let mut i = 0;
+    while i < line.len() && is_space(line[i]) && line[i] != b'\r' && line[i] != b'\n' {
+        i += 1;
+    }
+    if line.get(i) != Some(&b'{') {
+        return None;
+    }
+    parse_attributes(reader)
 }
 
 pub(super) enum ParseLinkTitleResult {

@@ -198,7 +198,7 @@ match markdown_to_html(&mut output, input) {
 | `escaped_space` | `false` | If true, a '\' escaped half-space(0x20) will not trigger parsers. |
 | `id_generator` | `None`(BasicNodeIdGenerator) | An ID generator for generating node IDs. |
 
-Currently only headings support attributes.
+Currently only headings, link and image links support attributes.
 Attributes are being discussed in the [CommonMark forum](https://talk.commonmark.org/t/consistent-attribute-syntax/272). This syntax may possibly change in the future.
 
 ```markdown
@@ -208,6 +208,10 @@ Attributes are being discussed in the [CommonMark forum](https://talk.commonmark
 
 heading {#id .className attrName=attrValue}
 ============
+
+[link](url){#id .class}
+
+![img](url){#id .class height=.8em}
 ```
 
 #### Arena options
