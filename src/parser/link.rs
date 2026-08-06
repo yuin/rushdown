@@ -255,7 +255,7 @@ fn parse_link(reader: &mut text::BlockReader) -> Option<Link> {
     reader.skip_spaces();
 
     let mut destination: Option<text::Value> = None;
-    let mut title: Option<text::MultilineValue> = None;
+    let mut title: Option<text::Value> = None;
     // empty link like '[link]()'
     if reader.peek_byte() == b')' {
         reader.advance(1);
@@ -287,7 +287,7 @@ fn parse_link(reader: &mut text::BlockReader) -> Option<Link> {
 }
 
 pub(super) enum ParseLinkTitleResult {
-    Ok(text::MultilineValue),
+    Ok(text::Value),
     Unclosed,
     None,
 }

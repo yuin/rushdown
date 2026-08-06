@@ -155,7 +155,7 @@ impl<W: TextWrite> RenderNode<W> for UserMentionHtmlRenderer<W> {
                 .write_html(w, self.options.class_name.as_str())?;
             self.writer.write_safe_str(w, "\"><strong>")?;
             let um = as_extension_data!(arena, node_ref, UserMention);
-            self.writer.write(w, um.username.str(source))?;
+            self.writer.write(w, &um.username.str(source))?;
         } else {
             self.writer.write_safe_str(w, "</strong></span>")?;
         }

@@ -55,7 +55,9 @@ impl ParagraphTransformer for TaskListItemParagraphTransformer {
                 Some(Task::Active)
             },
         );
-        lines[0] = lines[0].with_start(lines[0].start() + pos);
+        lines[0] = lines[0]
+            .with_start(lines[0].start() + pos)
+            .trim_left_space(reader.source());
         as_type_data_mut!(arena, paragraph_ref, Block).put_back_source(lines);
     }
 }

@@ -34,7 +34,8 @@ impl BlockParser for ParagraphParser {
             return None;
         }
         let node_ref = arena.new_node(Paragraph::new());
-        as_type_data_mut!(arena, node_ref, Block).append_source_line(segment);
+        as_type_data_mut!(arena, node_ref, Block)
+            .append_source_line(segment.trim_left_space(reader.source()));
 
         reader.advance_to_eol();
         Some((node_ref, State::NO_CHILDREN))
@@ -52,9 +53,7 @@ impl BlockParser for ParagraphParser {
             return None;
         }
         let block = as_type_data_mut!(arena, node_ref, Block);
-        // We do not trim leading spaces here
-        // ParagraphTransformer may need them
-        block.append_source_line(segment);
+        block.append_source_line(segment.trim_left_space(reader.source()));
         reader.advance_to_eol();
         Some(State::NO_CHILDREN)
     }
@@ -67,11 +66,6 @@ impl BlockParser for ParagraphParser {
         _ctx: &mut Context,
     ) {
         let block = as_type_data_mut!(arena, node_ref, Block);
-        // trim leading spaces
-        for i in 0..block.source().len() {
-            let line = block.source()[i];
-            block.replace_source_line(i, line.trim_left_space(reader.source()));
-        }
         // trim trailing spaces
         if let Some(last) = block.source().last() {
             block.replace_source_line(

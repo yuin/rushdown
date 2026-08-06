@@ -10,7 +10,7 @@ use memchr::memchr;
 #[allow(unused_imports)]
 #[cfg(all(not(feature = "std"), feature = "no-std-unix-debug"))]
 use crate::println;
-use crate::util::{self, is_blank, is_space, trim_left_space, utf8_len, TinyVec};
+use crate::util::{self, is_blank, is_space, utf8_len, TinyVec};
 
 const SPACE: &[u8] = b" ";
 
@@ -18,49 +18,75 @@ const SPACE: &[u8] = b" ";
 
 //   Value {{{
 
-/// An enum represents a string value that can be either an [`Index`] or a [`String`].
+/// An enum represents a string value that can be either an [`Index`], a collection of
+/// [`Index`]s, or a [`String`].
 /// [`Value`] does not handle padding.
-/// Value is used for representing values that can be represented by a single line, such as
-/// link destinations.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Value {
     /// An Index variant holds a reference to indicies in the source.
     Index(Index),
 
+    /// An Indices variant holds a collection of indices whose concatenation forms the value.
+    Indices(TinyVec<Index>),
+
     /// A String variant holds a string value.
     String(String),
 }
 
 impl Value {
-    /// Returns byte slice value.
-    pub fn bytes<'a>(&'a self, source: &'a str) -> &'a [u8] {
+    /// Returns byte slice value by concatenating all indices in the collection.
+    pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
         match self {
-            Value::Index(index) => index.bytes(source),
-            Value::String(s) => s.as_bytes(),
+            Value::Index(index) => Cow::Borrowed(index.bytes(source)),
+            Value::Indices(indices) => match (indices.get(0), indices.get(1)) {
+                (Some(f), None) => Cow::Borrowed(f.bytes(source)),
+                (None, _) => Cow::Borrowed(&[]),
+                _ => {
+                    let mut result = Vec::new();
+                    for idx in indices.iter() {
+                        result.extend_from_slice(idx.bytes(source));
+                    }
+                    Cow::Owned(result)
+                }
+            },
+            Value::String(s) => Cow::Borrowed(s.as_bytes()),
         }
     }
 
-    /// Returns str value.
-    pub fn str<'a>(&'a self, source: &'a str) -> &'a str {
+    /// Returns str value by concatenating all indices in the collection.
+    pub fn str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
         match self {
-            Value::Index(index) => index.str(source),
-            Value::String(s) => s.as_str(),
+            Value::Index(index) => Cow::Borrowed(index.str(source)),
+            Value::Indices(indices) => match (indices.get(0), indices.get(1)) {
+                (Some(f), None) => Cow::Borrowed(f.str(source)),
+                (None, _) => Cow::Borrowed(""),
+                _ => {
+                    let mut result = String::new();
+                    for idx in indices.iter() {
+                        result.push_str(idx.str(source));
+                    }
+                    Cow::Owned(result)
+                }
+            },
+            Value::String(s) => Cow::Borrowed(s.as_str()),
         }
     }
 
     /// Returns true if the value is empty, otherwise false.
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         match self {
             Value::Index(index) => index.is_empty(),
+            Value::Indices(indices) => indices.iter().all(|i| i.is_empty()),
             Value::String(s) => s.is_empty(),
         }
     }
 
     /// Returns the length of the value.
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         match self {
             Value::Index(index) => index.len(),
+            Value::Indices(indices) => indices.iter().map(|i| i.len()).sum(),
             Value::String(s) => s.len(),
         }
     }
@@ -69,6 +95,12 @@ impl Value {
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
         Value::String(String::from(s))
+    }
+}
+
+impl From<&String> for Value {
+    fn from(s: &String) -> Self {
+        Value::String(s.clone())
     }
 }
 
@@ -112,7 +144,18 @@ impl From<&Value> for Value {
     fn from(v: &Value) -> Self {
         match v {
             Value::Index(index) => Value::Index(*index),
+            Value::Indices(indices) => Value::Indices(indices.clone()),
             Value::String(s) => Value::String(s.clone()),
+        }
+    }
+}
+
+impl From<TinyVec<Index>> for Value {
+    fn from(indices: TinyVec<Index>) -> Self {
+        match (indices.get(0), indices.get(1)) {
+            (Some(f), None) => Value::Index(*f),
+            (None, _) => Value::Index(Index::new(0, 0)),
+            _ => Value::Indices(indices),
         }
     }
 }
@@ -217,161 +260,6 @@ impl From<Segment> for Index {
 }
 
 //   }}} Index
-
-//   MultilineValue {{{
-
-/// An enum represents a collection of values that can be either a collection of [`Index`] or
-/// a single [`String`].
-/// MultilineValue is used for representing values that can be represented by multiple lines, such as link
-/// titles.
-#[derive(Debug, Clone, Default)]
-#[non_exhaustive]
-pub enum MultilineValue {
-    #[default]
-    Empty,
-    Indices(TinyVec<Index>),
-    String(String),
-}
-
-impl MultilineValue {
-    /// Creates a [`MultilineValue`] from a single index.
-    pub fn from_index(index: Index) -> Self {
-        MultilineValue::Indices(TinyVec::from_single(index))
-    }
-
-    /// Creates a [`MultilineValue`] from a collection of indices.
-    pub fn from_indices(indices: Vec<Index>) -> Self {
-        MultilineValue::Indices(TinyVec::from_vec(indices))
-    }
-
-    /// Creates a [`MultilineValue`] from a string.
-    pub fn from_string(s: String) -> Self {
-        MultilineValue::String(s)
-    }
-
-    /// Returns a str value by concatenating all indices in the collection.
-    /// If this value has multiple indices, it will trim leading spaces of each index except the
-    /// first one.
-    pub fn str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        match self {
-            MultilineValue::Empty => Cow::Borrowed(""),
-            MultilineValue::Indices(indices) => {
-                let first = indices.get(0);
-                let second = indices.get(1);
-                if let Some(f) = first {
-                    if second.is_none() {
-                        return Cow::Borrowed(f.str(source));
-                    }
-                } else {
-                    return Cow::Borrowed("");
-                }
-                let mut result = String::new();
-                result.push_str(first.unwrap().str(source));
-                let b = second.unwrap().bytes(source);
-                result.push_str(unsafe { core::str::from_utf8_unchecked(trim_left_space(b)) });
-                for v in indices.iter().skip(2) {
-                    let b = v.bytes(source);
-                    result.push_str(unsafe { core::str::from_utf8_unchecked(trim_left_space(b)) });
-                }
-                Cow::Owned(result)
-            }
-            MultilineValue::String(s) => Cow::Borrowed(s.as_str()),
-        }
-    }
-
-    /// Returns a bytes value by concatenating all indices in the collection.
-    /// If this value has multiple indices, it will trim leading spaces of each index except the
-    /// first one.
-    pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
-        match self {
-            MultilineValue::Empty => Cow::Borrowed(&[]),
-            MultilineValue::Indices(indices) => {
-                let first = indices.get(0);
-                let second = indices.get(1);
-                if let Some(f) = first {
-                    if second.is_none() {
-                        return Cow::Borrowed(f.bytes(source));
-                    }
-                } else {
-                    return Cow::Borrowed(&[]);
-                }
-                let mut result = Vec::new();
-                result.extend_from_slice(first.unwrap().bytes(source));
-                result.extend_from_slice(trim_left_space(second.unwrap().bytes(source)));
-                for v in indices.iter().skip(2) {
-                    result.extend_from_slice(trim_left_space(v.bytes(source)));
-                }
-                Cow::Owned(result)
-            }
-            MultilineValue::String(s) => Cow::Borrowed(s.as_bytes()),
-        }
-    }
-}
-
-impl From<String> for MultilineValue {
-    fn from(s: String) -> Self {
-        MultilineValue::String(s)
-    }
-}
-
-impl From<&String> for MultilineValue {
-    fn from(s: &String) -> Self {
-        MultilineValue::String(s.clone())
-    }
-}
-
-impl From<&str> for MultilineValue {
-    fn from(s: &str) -> Self {
-        MultilineValue::String(String::from(s))
-    }
-}
-
-impl From<&[u8]> for MultilineValue {
-    fn from(s: &[u8]) -> Self {
-        MultilineValue::String(String::from_utf8_lossy(s).into_owned())
-    }
-}
-
-impl From<Vec<u8>> for MultilineValue {
-    fn from(s: Vec<u8>) -> Self {
-        MultilineValue::String(String::from_utf8_lossy(&s).into_owned())
-    }
-}
-
-impl From<Cow<'_, str>> for MultilineValue {
-    fn from(s: Cow<'_, str>) -> Self {
-        MultilineValue::String(s.into_owned())
-    }
-}
-
-impl From<Cow<'_, [u8]>> for MultilineValue {
-    fn from(s: Cow<'_, [u8]>) -> Self {
-        MultilineValue::String(String::from_utf8_lossy(&s).into_owned())
-    }
-}
-
-impl From<Value> for MultilineValue {
-    fn from(v: Value) -> Self {
-        match v {
-            Value::Index(index) => MultilineValue::Indices(TinyVec::from_single(index)),
-            Value::String(s) => MultilineValue::String(s),
-        }
-    }
-}
-
-impl From<Segment> for MultilineValue {
-    fn from(segment: Segment) -> Self {
-        MultilineValue::Indices(TinyVec::from_single(segment.into()))
-    }
-}
-
-impl From<TinyVec<Index>> for MultilineValue {
-    fn from(indices: TinyVec<Index>) -> Self {
-        MultilineValue::Indices(indices)
-    }
-}
-
-//   }}} MuiltineValue
 
 // }}} Value
 
@@ -513,38 +401,38 @@ const fn binary_search_block_pos(block: &Block, pos: usize) -> Option<usize> {
 /// Extension trait for [`Block`].
 pub trait BlockExt {
     /// Returns a collection of values by converting each segment in the block to a value.
-    fn to_values(&self) -> MultilineValue;
+    fn to_values(&self) -> Value;
 }
 
 impl BlockExt for Block {
-    fn to_values(&self) -> MultilineValue {
+    fn to_values(&self) -> Value {
         let first = self.first();
         let second = self.get(1);
         if let Some(f) = first {
             if second.is_none() {
-                return MultilineValue::from_index((f.start(), f.stop()).into());
+                return Value::Index((f.start(), f.stop()).into());
             }
         } else {
-            return MultilineValue::default();
+            return Value::Index(Index::new(0, 0));
         }
         let mut result = Vec::with_capacity(self.len());
         for v in self.iter() {
             result.push((v.start(), v.stop()).into());
         }
-        MultilineValue::from_indices(result)
+        Value::Indices(TinyVec::from_vec(result))
     }
 }
 
-pub(crate) fn block_to_values(i: impl IntoIterator<Item = Segment>) -> MultilineValue {
+pub(crate) fn block_to_values(i: impl IntoIterator<Item = Segment>) -> Value {
     let mut b = i.into_iter();
     let first = b.next();
     let second = b.next();
     if let Some(f) = first {
         if second.is_none() {
-            return MultilineValue::from_index(f.into());
+            return Value::Index(f.into());
         }
     } else {
-        return MultilineValue::default();
+        return Value::Index(Index::new(0, 0));
     }
     let mut result = Vec::with_capacity(2 + b.size_hint().0);
     result.push(first.unwrap().into());
@@ -552,7 +440,7 @@ pub(crate) fn block_to_values(i: impl IntoIterator<Item = Segment>) -> Multiline
     for segment in b {
         result.push(segment.into());
     }
-    MultilineValue::from_indices(result)
+    Value::Indices(TinyVec::from_vec(result))
 }
 
 //   }}} Block
@@ -1188,7 +1076,7 @@ impl<'a> BlockReader<'a> {
 
     /// Returns Values that contains value between the current position and the given
     /// position.
-    pub fn between_current(&mut self, line: usize, pos: Segment) -> MultilineValue {
+    pub fn between_current(&mut self, line: usize, pos: Segment) -> Value {
         if line == self.line.unwrap_or(0) {
             let seg = self.block[line];
             if pos.start() >= seg.start() && self.pos.start() <= seg.stop() {
@@ -1214,7 +1102,7 @@ impl<'a> BlockReader<'a> {
     }
 
     /// Returns Values that contains segments between the given range.
-    pub fn between(&self, range: Range<usize>) -> MultilineValue {
+    pub fn between(&self, range: Range<usize>) -> Value {
         let from_line = binary_search_block_pos(self.block, range.start).unwrap_or(0);
         let mut from_pos = self.block[from_line];
         if range.start >= from_pos.start() && range.end <= from_pos.stop() {
@@ -1588,15 +1476,12 @@ mod tests {
     fn test_raw() {
         let buffer = "Hello, world!";
         let index = Value::from((0, 5));
-        let s: &[u8] = index.bytes(buffer);
-        assert_eq!(s, b"Hello");
+        assert_eq!(index.bytes(buffer), b"Hello".as_slice());
 
         let raw_string = Value::from("Hello");
-        let s: &[u8] = raw_string.bytes(buffer);
-        assert_eq!(s, b"Hello");
+        assert_eq!(raw_string.bytes(buffer), b"Hello".as_slice());
 
-        let str: &str = index.str(buffer);
-        assert_eq!(str, "Hello");
+        assert_eq!(index.str(buffer), "Hello");
 
         let string = String::from("Hello");
         let v = Value::from(string.as_str());

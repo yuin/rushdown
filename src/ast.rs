@@ -749,7 +749,7 @@ impl Meta {
 pub type Metadata = StringMap<Meta>;
 
 /// Attributes associated with a node.
-pub type Attributes = StringMap<text::MultilineValue>;
+pub type Attributes = StringMap<text::Value>;
 
 // }}} Metadata & Attributes
 
@@ -1790,11 +1790,8 @@ impl CodeBlock {
 
     /// Returns the info string of the fenced code block.
     #[inline(always)]
-    pub fn info_str<'a>(&'a self, source: &'a str) -> Option<&'a str> {
-        match &self.info {
-            Some(info) => Some(info.str(source)),
-            None => None,
-        }
+    pub fn info_str<'a>(&'a self, source: &'a str) -> Option<Cow<'a, str>> {
+        self.info.as_ref().map(|info| info.str(source))
     }
 
     /// Returns the info value of the fenced code block.
@@ -1804,16 +1801,15 @@ impl CodeBlock {
     }
 
     /// Returns the language of the fenced code block, if specified.
-    pub fn language_str<'a>(&'a self, source: &'a str) -> Option<&'a str> {
-        match &self.info {
-            Some(info) => {
-                let info_str = info.str(source);
-                info_str
-                    .find(' ')
-                    .map(|i| &info_str[..i])
-                    .or(Some(info_str))
-            }
-            None => None,
+    pub fn language_str<'a>(&'a self, source: &'a str) -> Option<Cow<'a, str>> {
+        let info = self.info.as_ref()?;
+        let info_str = info.str(source);
+        match info_str.find(' ') {
+            None => Some(info_str),
+            Some(i) => Some(match info_str {
+                Cow::Borrowed(s) => Cow::Borrowed(&s[..i]),
+                Cow::Owned(s) => Cow::Owned(String::from(&s[..i])),
+            }),
         }
     }
 }
@@ -1845,7 +1841,7 @@ impl PrettyPrint for CodeBlock {
             pp_indent(level),
             match self.info_str(source) {
                 Some(info) => info,
-                None => &"<none>",
+                None => Cow::Borrowed("<none>"),
             }
         )?;
         write!(w, "{}Value: ", pp_indent(level))?;
@@ -2195,15 +2191,15 @@ impl From<HtmlBlock> for KindData {
 /// Represents a link reference definition node.
 #[derive(Debug)]
 pub struct LinkReferenceDefinition {
-    label: text::MultilineValue,
+    label: text::Value,
     destination: text::Value,
-    title: Option<text::MultilineValue>,
+    title: Option<text::Value>,
 }
 
 impl LinkReferenceDefinition {
     /// Creates a new [`LinkReferenceDefinition`] node.
     pub fn new(
-        label: impl Into<text::MultilineValue>,
+        label: impl Into<text::Value>,
         destination: impl Into<text::Value>,
     ) -> Self {
         Self {
@@ -2215,9 +2211,9 @@ impl LinkReferenceDefinition {
 
     /// Creates a new [`LinkReferenceDefinition`] node with a title.
     pub fn with_title(
-        label: impl Into<text::MultilineValue>,
+        label: impl Into<text::Value>,
         destination: impl Into<text::Value>,
-        title: impl Into<text::MultilineValue>,
+        title: impl Into<text::Value>,
     ) -> Self {
         Self {
             label: label.into(),
@@ -2228,7 +2224,7 @@ impl LinkReferenceDefinition {
 
     /// Returns the label of the link reference definition.
     #[inline(always)]
-    pub fn label(&self) -> &text::MultilineValue {
+    pub fn label(&self) -> &text::Value {
         &self.label
     }
 
@@ -2246,13 +2242,13 @@ impl LinkReferenceDefinition {
 
     /// Returns the string representation of the destination of the link reference definition.
     #[inline(always)]
-    pub fn destination_str<'a>(&'a self, source: &'a str) -> &'a str {
+    pub fn destination_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
         self.destination.str(source)
     }
 
     /// Returns the title of the link reference definition.
     #[inline(always)]
-    pub fn title(&self) -> Option<&text::MultilineValue> {
+    pub fn title(&self) -> Option<&text::Value> {
         self.title.as_ref()
     }
 
@@ -2587,12 +2583,12 @@ impl Text {
     }
 
     /// Returns the bytes of this text.
-    pub fn bytes<'a>(&'a self, source: &'a str) -> &'a [u8] {
+    pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
         self.value.bytes(source)
     }
 
     /// Returns the UTF-8 string  of this text.
-    pub fn str<'a>(&'a self, source: &'a str) -> &'a str {
+    pub fn str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
         self.value.str(source)
     }
 }
@@ -2824,7 +2820,7 @@ pub enum LinkReferenceKind {
 /// Represents a link reference in the document.
 #[derive(Debug)]
 pub struct LinkReference {
-    value: text::MultilineValue,
+    value: text::Value,
     link_reference_kind: LinkReferenceKind,
 }
 
@@ -2837,7 +2833,7 @@ impl LinkReference {
 
     /// Returns the reference value of this link reference.
     #[inline(always)]
-    pub fn value(&self) -> &text::MultilineValue {
+    pub fn value(&self) -> &text::Value {
         &self.value
     }
 
@@ -2857,7 +2853,7 @@ pub struct AutoLink {
 impl AutoLink {
     /// Returns the string representation of the auto link text of this auto link.
     #[inline(always)]
-    pub fn text_str<'a>(&'a self, source: &'a str) -> &'a str {
+    pub fn text_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
         self.text.str(source)
     }
 
@@ -2873,7 +2869,7 @@ impl AutoLink {
 pub struct Link {
     destination: text::Value,
 
-    title: Option<text::MultilineValue>,
+    title: Option<text::Value>,
 
     link_kind: LinkKind,
 }
@@ -2891,7 +2887,7 @@ impl Link {
     /// Creates a new inline link with the given destination and title.
     pub fn inline_with_title(
         destination: impl Into<text::Value>,
-        title: impl Into<text::MultilineValue>,
+        title: impl Into<text::Value>,
     ) -> Self {
         Self {
             destination: destination.into(),
@@ -2903,7 +2899,7 @@ impl Link {
     /// Creates a new reference link with the given destination and reference value.
     pub fn reference(
         destination: impl Into<text::Value>,
-        value: impl Into<text::MultilineValue>,
+        value: impl Into<text::Value>,
         reference_kind: LinkReferenceKind,
     ) -> Self {
         Self {
@@ -2919,9 +2915,9 @@ impl Link {
     /// Creates a new reference link with the given destination, reference value and title.
     pub fn reference_with_title(
         destination: impl Into<text::Value>,
-        value: impl Into<text::MultilineValue>,
+        value: impl Into<text::Value>,
         reference_kind: LinkReferenceKind,
-        title: impl Into<text::MultilineValue>,
+        title: impl Into<text::Value>,
     ) -> Self {
         Self {
             destination: destination.into(),
@@ -2950,13 +2946,13 @@ impl Link {
 
     /// Returns the string representation of the destination of the link.
     #[inline(always)]
-    pub fn destination_str<'a>(&'a self, source: &'a str) -> &'a str {
+    pub fn destination_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
         self.destination.str(source)
     }
 
     /// Returns the title of the link, if it exists.
     #[inline(always)]
-    pub fn title(&self) -> Option<&text::MultilineValue> {
+    pub fn title(&self) -> Option<&text::Value> {
         self.title.as_ref()
     }
 
@@ -3040,7 +3036,7 @@ impl From<Link> for KindData {
 pub struct Image {
     destination: text::Value,
 
-    title: Option<text::MultilineValue>,
+    title: Option<text::Value>,
 
     link_kind: LinkKind,
 }
@@ -3066,7 +3062,7 @@ impl Image {
     /// Creates a new inline image with the given destination and title.
     pub fn inline_with_title(
         destination: impl Into<text::Value>,
-        title: impl Into<text::MultilineValue>,
+        title: impl Into<text::Value>,
     ) -> Self {
         Self {
             destination: destination.into(),
@@ -3078,7 +3074,7 @@ impl Image {
     /// Creates a new reference image with the given destination and reference value.
     pub fn reference(
         destination: impl Into<text::Value>,
-        value: impl Into<text::MultilineValue>,
+        value: impl Into<text::Value>,
         reference_kind: LinkReferenceKind,
     ) -> Self {
         Self {
@@ -3094,9 +3090,9 @@ impl Image {
     /// Creates a new reference image with the given destination, reference value and title.
     pub fn reference_with_title(
         destination: impl Into<text::Value>,
-        value: impl Into<text::MultilineValue>,
+        value: impl Into<text::Value>,
         reference_kind: LinkReferenceKind,
-        title: impl Into<text::MultilineValue>,
+        title: impl Into<text::Value>,
     ) -> Self {
         Self {
             destination: destination.into(),
@@ -3116,13 +3112,13 @@ impl Image {
 
     /// Returns the string representation of the destination of the link.
     #[inline(always)]
-    pub fn destination_str<'a>(&'a self, source: &'a str) -> &'a str {
+    pub fn destination_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
         self.destination.str(source)
     }
 
     /// Returns the title of the link, if it exists.
     #[inline(always)]
-    pub fn title(&self) -> Option<&text::MultilineValue> {
+    pub fn title(&self) -> Option<&text::Value> {
         self.title.as_ref()
     }
 
@@ -3177,18 +3173,18 @@ impl From<Image> for KindData {
 /// Represents an inline raw HTML node.
 #[derive(Debug)]
 pub struct RawHtml {
-    value: text::MultilineValue,
+    value: text::Value,
 }
 
 impl RawHtml {
     /// Creates a new RawHtml
-    pub fn new(value: text::MultilineValue) -> Self {
+    pub fn new(value: text::Value) -> Self {
         Self { value }
     }
 
     /// Returns the value of this raw HTML.
     #[inline(always)]
-    pub fn value(&self) -> &text::MultilineValue {
+    pub fn value(&self) -> &text::Value {
         &self.value
     }
 

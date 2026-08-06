@@ -366,7 +366,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
             let kd = as_kind_data!(arena, node_ref, CodeBlock);
             if let Some(lang) = kd.language_str(source) {
                 self.writer.write_safe_str(w, " class=\"language-")?;
-                self.writer.write(w, lang)?;
+                self.writer.write(w, &lang)?;
                 self.writer.write_safe_str(w, "\"")?;
             }
             self.writer.write_safe_str(w, ">")?;
@@ -634,7 +634,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         if entering {
             let kd = as_kind_data!(arena, node_ref, Text);
-            self.writer.write(w, kd.str(source))?;
+            self.writer.write(w, &kd.str(source))?;
             if kd.has_qualifiers(TextQualifier::HARD_LINE_BREAK)
                 || (kd.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
                     && self.format_options.hard_wraps)
@@ -742,7 +742,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
                 if let Some(fc) = arena[node_ref].first_child() {
                     if matches_kind!(arena, fc, Text) {
                         let t = as_kind_data!(arena, fc, Text);
-                        self.writer.raw_write(w, t.str(source))?;
+                        self.writer.raw_write(w, &t.str(source))?;
                         self.writer.write_safe_str(w, "</a>")?;
                     }
                 }

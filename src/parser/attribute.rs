@@ -56,9 +56,7 @@ pub fn parse_attributes<'a>(reader: &mut impl text::Reader<'a>) -> Option<Attrib
     }
 }
 
-fn parse_attribute<'a>(
-    reader: &mut impl text::Reader<'a>,
-) -> Option<(String, text::MultilineValue)> {
+fn parse_attribute<'a>(reader: &mut impl text::Reader<'a>) -> Option<(String, text::Value)> {
     reader.skip_spaces();
     let c = reader.peek_byte();
     if c == b'#' || c == b'.' {
@@ -112,7 +110,7 @@ fn parse_attribute<'a>(
     Some((String::from_utf8_lossy(name).into_owned(), value))
 }
 
-fn parse_attribute_value<'a>(reader: &mut impl text::Reader<'a>) -> Option<text::MultilineValue> {
+fn parse_attribute_value<'a>(reader: &mut impl text::Reader<'a>) -> Option<text::Value> {
     reader.skip_spaces();
     match reader.peek_byte() {
         b'"' => parse_quoted_attribute_value(reader, b'"'),
@@ -124,7 +122,7 @@ fn parse_attribute_value<'a>(reader: &mut impl text::Reader<'a>) -> Option<text:
 fn parse_quoted_attribute_value<'a>(
     reader: &mut impl text::Reader<'a>,
     q: u8,
-) -> Option<text::MultilineValue> {
+) -> Option<text::Value> {
     reader.advance(1); // skip a opening quote
     let mut value = TinyVec::<text::Index>::empty();
     let mut break_loop = false;
@@ -175,7 +173,7 @@ fn parse_quoted_attribute_value<'a>(
 
 fn parse_unquoted_attribute_value<'a>(
     reader: &mut impl text::Reader<'a>,
-) -> Option<text::MultilineValue> {
+) -> Option<text::Value> {
     let (line, mut s) = reader.peek_line_bytes()?;
     let i = line
         .iter()
@@ -220,25 +218,19 @@ mod tests {
         let mut reader = text::BasicReader::new(source);
         let attrs = parse_attributes(&mut reader).unwrap();
         assert_eq!(attrs.get("id").unwrap().str(source), "my-id");
-        assert!(matches!(
-            attrs.get("id").unwrap(),
-            &text::MultilineValue::Indices(_)
-        ));
+        assert!(matches!(attrs.get("id").unwrap(), &text::Value::Index(_)));
         assert_eq!(attrs.get("class").unwrap().str(source), "class1 class2");
         assert!(matches!(
             attrs.get("class").unwrap(),
-            &text::MultilineValue::String(_)
+            &text::Value::String(_)
         ));
         assert_eq!(attrs.get("title").unwrap().str(source), "My &Title");
         assert!(matches!(
             attrs.get("title").unwrap(),
-            &text::MultilineValue::String(_)
+            &text::Value::String(_)
         ));
         assert_eq!(attrs.get("attr").unwrap().str(source), "aaa");
-        assert!(matches!(
-            attrs.get("attr").unwrap(),
-            &text::MultilineValue::Indices(_)
-        ));
+        assert!(matches!(attrs.get("attr").unwrap(), &text::Value::Index(_)));
 
         let (line, _) = reader.peek_line().unwrap();
         assert_eq!(line.as_ref(), " rest of line");
@@ -255,7 +247,7 @@ mod tests {
         );
         assert!(matches!(
             attrs.get("title").unwrap(),
-            &text::MultilineValue::Indices(_)
+            &text::Value::Indices(_)
         ));
         let (line, _) = reader.peek_line().unwrap();
         assert_eq!(line.as_ref(), " rest");
