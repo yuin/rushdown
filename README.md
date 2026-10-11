@@ -459,6 +459,7 @@ HtmlRenderer constructor function can take these arguments if needed, in any ord
 - [rushdown-fenced-div](https://github.com/growler/rushdown-fenced-div): Fenced div extension for rushdown markdown parser.
 - [rushdown-definition-list](https://crates.io/crates/rushdown-definition-list): A definition list extension for rushdown.
 - [rushdown-link-attribute](https://crates.io/crates/rushdown-link-attribute): A link attribute extension for rushdown.
+- [rushdown-math](https://crates.io/crates/rushdown-math): A KaTeX parsing extension for rushdown.
 
 ## Donation
 BTC: 1NEDSyUmo4SMTDP83JJQSWi1MvQUGGNMZB
