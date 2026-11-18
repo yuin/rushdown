@@ -218,6 +218,48 @@ impl NodeIds {
 
 //   }}} NodeIds
 
+//   ParseOptions {{{
+
+/// Specifies where the parsed AST is pretty printed.
+#[derive(Default)]
+pub enum PrettyPrintTarget<'a> {
+    /// Does not print the AST.
+    #[default]
+    Disabled,
+    /// Prints the AST to stdout.
+    Stdout,
+    /// Prints the AST to the given writer.
+    Writer(&'a mut dyn core::fmt::Write),
+}
+
+/// Trait for initializing the [`Context`] before parsing.
+pub trait InitializeContext {
+    /// Initializes the given context.
+    fn initialize(&mut self, context: &mut Context, registry: &ContextKeyRegistry);
+}
+
+impl<F> InitializeContext for F
+where
+    F: FnMut(&mut Context, &ContextKeyRegistry),
+{
+    fn initialize(&mut self, context: &mut Context, registry: &ContextKeyRegistry) {
+        self(context, registry)
+    }
+}
+
+/// Options for a single call of [`Parser::parse`].
+#[derive(Default)]
+pub struct ParseOptions<'a> {
+    /// A function that initializes the [`Context`] before parsing.
+    /// This allows you to share values with parsers.
+    pub context_initializer: Option<&'a mut dyn InitializeContext>,
+
+    /// Pretty print options for debugging the resulting AST.
+    pub pretty_print: PrettyPrintTarget<'a>,
+}
+
+// }}} ParseOptions
+
 //   ContextOptions {{{
 
 /// Options for configuring the [`Context`].
@@ -554,6 +596,23 @@ bitflags! {
     }
 }
 
+/// A trait for initializing the [`ContextKeyRegistry`] of a [`Parser`].
+/// This is called once when the parser is created, so that you can register
+/// context keys before parsing.
+pub trait InitializeContextKeyRegistry {
+    /// Initializes the given registry.
+    fn initialize(&self, registry: &mut ContextKeyRegistry);
+}
+
+impl<F> InitializeContextKeyRegistry for F
+where
+    F: Fn(&mut ContextKeyRegistry),
+{
+    fn initialize(&self, registry: &mut ContextKeyRegistry) {
+        self(registry)
+    }
+}
+
 /// Options for the parser.
 #[derive(Default, Clone)]
 pub struct Options {
@@ -579,6 +638,9 @@ pub struct Options {
 
     /// A custom node ID generator.
     pub id_generator: Option<Rc<dyn GenerateNodeId>>,
+
+    /// A function that initializes the [`ContextKeyRegistry`] when the parser is created.
+    pub context_key_registry_initializer: Option<Rc<dyn InitializeContextKeyRegistry>>,
 }
 
 impl Debug for Options {
@@ -590,6 +652,10 @@ impl Debug for Options {
             .field("arena", &self.arena)
             .field("escaped_space", &self.escaped_space)
             .field("id_generator", &"Option<Rc<dyn NodeIdGenerator>>")
+            .field(
+                "context_key_registry_initializer",
+                &"Option<Rc<dyn InitializeContextKeyRegistry>>",
+            )
             .finish()
     }
 }
@@ -835,6 +901,9 @@ impl Parser {
             tmp_paragraph_transformers: None,
             paragraph_transformers: Vec::new(),
         };
+        if let Some(initializer) = &p.options.context_key_registry_initializer {
+            initializer.initialize(&mut p.context_key_registry.borrow_mut());
+        }
         if !p.options.without_default_parsers {
             p.add_default_block_parsers();
             p.add_default_inline_parsers();
@@ -1030,15 +1099,17 @@ impl Parser {
         }
     }
 
-    /// Parses the input from the given reader and returns the resulting AST arena and root
-    /// document node.
-    pub fn parse(&self, source: &str) -> (Arena, NodeRef) {
+    /// Parses the given source and returns the resulting AST arena and root document node.
+    pub fn parse(&self, source: &str, options: ParseOptions<'_>) -> (Arena, NodeRef) {
         let mut reader =
             text::BasicReader::with_decoder(source, text::Decoder::new(self.options.escaped_space));
         let mut arena = Arena::with_options(self.options.arena);
         let context = &mut Context::new();
         let reg = self.context_key_registry.borrow();
         context.initialize(&reg);
+        if let Some(initializer) = options.context_initializer {
+            initializer.initialize(context, &reg);
+        }
 
         let doc = arena.new_node(ast::Document::new());
         self.parse_blocks(&mut arena, doc, &mut reader, context);
@@ -1068,12 +1139,16 @@ impl Parser {
             transformer.transform(&mut arena, doc, &mut reader, context);
         }
 
-        #[cfg(feature = "pp-ast")]
-        {
-            use crate::ast::pretty_print;
-            let mut out = String::new();
-            pretty_print(&mut out, &arena, doc, reader.source()).unwrap();
-            println!("{}", out);
+        match options.pretty_print {
+            PrettyPrintTarget::Disabled => {}
+            PrettyPrintTarget::Stdout => {
+                let mut out = String::new();
+                ast::pretty_print(&mut out, &arena, doc, source).unwrap();
+                println!("{}", out);
+            }
+            PrettyPrintTarget::Writer(w) => {
+                ast::pretty_print(w, &arena, doc, source).unwrap();
+            }
         }
 
         (arena, doc)

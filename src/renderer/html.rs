@@ -20,7 +20,7 @@ use crate::{
 // FormatOptions {{{
 
 /// Common options for rendering HTML.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Options {
     /// Renders soft line breaks as hard line breaks (`<br />`).
     pub hard_wraps: bool,
@@ -36,6 +36,25 @@ pub struct Options {
 
     /// Attribute filters for rendering.
     pub attribute_filters: Option<Rc<AttributeFilters>>,
+
+    /// A function that initializes the [`ContextKeyRegistry`] when the renderer is created.
+    pub context_key_registry_initializer: Option<Rc<dyn InitializeContextKeyRegistry>>,
+}
+
+impl core::fmt::Debug for Options {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Options")
+            .field("hard_wraps", &self.hard_wraps)
+            .field("xhtml", &self.xhtml)
+            .field("allows_unsafe", &self.allows_unsafe)
+            .field("escaped_space", &self.escaped_space)
+            .field("attribute_filters", &self.attribute_filters)
+            .field(
+                "context_key_registry_initializer",
+                &"Option<Rc<dyn InitializeContextKeyRegistry>>",
+            )
+            .finish()
+    }
 }
 
 impl Default for Options {
@@ -47,6 +66,7 @@ impl Default for Options {
             allows_unsafe: false,
             escaped_space: false,
             attribute_filters: Some(Rc::new(AttributeFilters::default())),
+            context_key_registry_initializer: None,
         }
     }
 }
@@ -958,6 +978,9 @@ impl<'r, W: TextWrite> Renderer<'r, W> {
     /// [`add_node_renderer`]: Self::add_node_renderer
     pub fn with_extensions(options: Options, ext: impl RendererExtension<'r, W>) -> Self {
         let helper = RendererHelper::new(options.clone(), BuiltinNodesRenderer::new(options));
+        if let Some(initializer) = &helper.format_options.context_key_registry_initializer {
+            initializer.initialize(&mut helper.context_key_registry.borrow_mut());
+        }
         let mut s = Self { helper };
         ext.apply(&mut s);
         s.init();
@@ -1005,8 +1028,9 @@ impl<'r, W: TextWrite> Renderer<'r, W> {
         source: &'a str,
         arena: &'a Arena,
         node_ref: NodeRef,
+        options: RenderOptions<'_>,
     ) -> Result<()> {
-        self.helper.render(writer, source, arena, node_ref)
+        self.helper.render(writer, source, arena, node_ref, options)
     }
 }
 

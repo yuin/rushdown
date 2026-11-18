@@ -117,6 +117,50 @@ impl Context {
 }
 // }}} Context
 
+// RenderOptions {{{
+
+/// Trait for initializing the [`Context`] before rendering.
+pub trait InitializeContext {
+    /// Initializes the given context.
+    fn initialize(&mut self, context: &mut Context, registry: &ContextKeyRegistry);
+}
+
+impl<F> InitializeContext for F
+where
+    F: FnMut(&mut Context, &ContextKeyRegistry),
+{
+    fn initialize(&mut self, context: &mut Context, registry: &ContextKeyRegistry) {
+        self(context, registry)
+    }
+}
+
+/// A trait for initializing the [`ContextKeyRegistry`] of a renderer.
+/// This is called once when the renderer is created, so that you can register
+/// context keys before rendering.
+pub trait InitializeContextKeyRegistry {
+    /// Initializes the given registry.
+    fn initialize(&self, registry: &mut ContextKeyRegistry);
+}
+
+impl<F> InitializeContextKeyRegistry for F
+where
+    F: Fn(&mut ContextKeyRegistry),
+{
+    fn initialize(&self, registry: &mut ContextKeyRegistry) {
+        self(registry)
+    }
+}
+
+/// Options for a single call of `render`.
+#[derive(Default)]
+pub struct RenderOptions<'a> {
+    /// A function that initializes the [`Context`] before rendering.
+    /// This allows you to share values with renderers.
+    pub context_initializer: Option<&'a mut dyn InitializeContext>,
+}
+
+// }}} RenderOptions
+
 // NodeKind {{{
 
 /// A unique identifier for a node kind.
@@ -592,10 +636,14 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
         source: &'a str,
         arena: &'a Arena,
         node_ref: NodeRef,
+        options: RenderOptions<'_>,
     ) -> Result<()> {
         let context = &mut Context::new();
         let reg = self.context_key_registry.borrow();
         context.initialize(&reg);
+        if let Some(initializer) = options.context_initializer {
+            initializer.initialize(context, &reg);
+        }
         let render = RenrererHelperRender { helper: self };
 
         if let Some(pre_hooks) = &self.pre_render_hooks {

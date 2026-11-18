@@ -34,7 +34,6 @@ hashbrown = ["dep:hashbrown"]
 no-std = ["alloc", "hashbrown"]
 no-std-unix-debug = ["no-std", "dep:libc"]
 profile = ["dep:pprof"]
-pp-ast = []
 
 [dependencies]
 hashbrown = { version = "0.15.2", optional = true}

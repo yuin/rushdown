@@ -91,8 +91,14 @@ where
     let parser = Parser::with_extensions(parser_options, parser_extension);
     let renderer = html::Renderer::<'r, W>::with_extensions(renderer_options, renderer_extension);
     move |output: &mut W, source: &str| {
-        let (arena, document_ref) = parser.parse(source);
-        renderer.render(output, source, &arena, document_ref)
+        let (arena, document_ref) = parser.parse(source, parser::ParseOptions::default());
+        renderer.render(
+            output,
+            source,
+            &arena,
+            document_ref,
+            renderer::RenderOptions::default(),
+        )
     }
 }
 
@@ -131,8 +137,14 @@ pub fn new_markdown_to_html_string<'r>(
 pub fn markdown_to_html_string(output: &mut String, source: &str) -> Result<()> {
     let parser = Parser::with_options(parser::Options::default());
     let renderer = html::Renderer::with_options(html::Options::default());
-    let (arena, document_ref) = parser.parse(source);
-    renderer.render(output, source, &arena, document_ref)
+    let (arena, document_ref) = parser.parse(source, parser::ParseOptions::default());
+    renderer.render(
+        output,
+        source,
+        &arena,
+        document_ref,
+        renderer::RenderOptions::default(),
+    )
 }
 
 // macros {{{
@@ -468,7 +480,7 @@ macro_rules! as_type_data_mut {
 /// });
 /// let renderer = html::Renderer::with_options(html::Options::default());
 /// let mut output = String::new();
-/// renderer.render(&mut output, "", &arena, doc).expect("Failed to render HTML");
+/// renderer.render(&mut output, "", &arena, doc, Default::default()).expect("Failed to render HTML");
 /// assert_eq!(output, "<blockquote>\n<p class=\"paragraph\">Hello, World!</p>\n<p>This is a test.</p>\n</blockquote>\n");
 /// ```
 #[macro_export]

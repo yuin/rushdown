@@ -5,7 +5,7 @@ fn test_inline_pos_aux(source: &str, node_type: &str) {
         parser::Options::default(),
         parser::gfm(parser::GfmOptions::default()),
     );
-    let (arena, document_ref) = p.parse(source);
+    let (arena, document_ref) = p.parse(source, parser::ParseOptions::default());
     let n = node_path!(arena, document_ref, first_child, first_child).unwrap();
     assert_eq!(
         arena[n].pos(),
@@ -13,13 +13,6 @@ fn test_inline_pos_aux(source: &str, node_type: &str) {
         "failed to get correct node position({})",
         node_type
     );
-    #[cfg(feature = "pp-ast")]
-    {
-        use rushdown::ast::pretty_print;
-        let mut w = String::new();
-        pretty_print(&mut w, &arena, document_ref, source).expect("failed to pretty print");
-        println!("{}", w);
-    }
 }
 
 #[test]
@@ -110,7 +103,7 @@ fn test_block_pos_aux(source: &str, node_type: &str, expected: usize, n: usize) 
         parser::Options::default(),
         parser::gfm(parser::GfmOptions::default()),
     );
-    let (arena, document_ref) = p.parse(source);
+    let (arena, document_ref) = p.parse(source, parser::ParseOptions::default());
 
     let mut fc = arena[document_ref].first_child().unwrap();
     for _ in 0..n {
@@ -122,14 +115,6 @@ fn test_block_pos_aux(source: &str, node_type: &str, expected: usize, n: usize) 
         "failed to get correct node position({})",
         node_type
     );
-
-    #[cfg(feature = "pp-ast")]
-    {
-        use rushdown::ast::pretty_print;
-        let mut w = String::new();
-        pretty_print(&mut w, &arena, document_ref, source).expect("failed to pretty print");
-        println!("{}", w);
-    }
 }
 
 #[test]
@@ -245,7 +230,7 @@ aaaa
         parser::Options::default(),
         parser::gfm(parser::GfmOptions::default()),
     );
-    let (mut arena, document_ref) = p.parse(source);
+    let (mut arena, document_ref) = p.parse(source, parser::ParseOptions::default());
 
     {
         let n = node_path!(&mut arena, document_ref, first_child).unwrap();
