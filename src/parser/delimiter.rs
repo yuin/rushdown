@@ -7,10 +7,53 @@ use crate::{
     ast::{Arena, NodeRef, Text, TextQualifier},
     parser::{Context, Delimiter, DelimiterProcessor, ParseStackElemRef},
     text::{self, Reader, Segment},
-    util::{char_at, is_unicode_space, is_unicode_symbol_or_punct},
+    util::{char_at, is_punct, is_space, is_unicode_space, is_unicode_symbol_or_punct},
 };
 
-/// Parse a delimiter run in the reader.
+/// Signature of functions that parse a delimiter run.
+/// See [`parse_delimiter`] and [`parse_delimiter_simple`].
+pub type ParseDelimiterFn = fn(
+    &mut Arena,
+    NodeRef,
+    &mut text::BlockReader<'_>,
+    usize,
+    &DelimiterProcessor,
+    &mut Context,
+) -> Option<NodeRef>;
+
+#[inline(always)]
+fn char_class(c: char) -> (bool, bool) {
+    if c.is_ascii() {
+        let b = c as u8;
+        return (is_space(b), is_punct(b));
+    }
+    (is_unicode_space(c), is_unicode_symbol_or_punct(c))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_delimiter(
+    arena: &mut Arena,
+    reader: &mut text::BlockReader<'_>,
+    segment: &Segment,
+    c: u8,
+    j: usize,
+    can_open: bool,
+    can_close: bool,
+    processor: &DelimiterProcessor,
+    ctx: &mut Context,
+) -> NodeRef {
+    reader.advance(j);
+    let delim = Delimiter::new(c, j, can_open, can_close, processor.clone());
+    let seg: Segment = (segment.start(), segment.start() + j).into();
+    let t = arena.new_node(Text::with_qualifiers(
+        text::Value::from_segment(seg, reader.decoder()),
+        TextQualifier::TEMP,
+    ));
+    ctx.delimiters_mut().push(delim, t);
+    t
+}
+
+/// Parse a delimiter run in the reader that follows the CommonMark spec.
 /// If a delimiter run is found, it is added to the context's delimiter list,
 /// and the reader is advanced past the delimiter run.
 /// Returns a [`NodeRef`] to the text node representing the delimiter run.
@@ -25,45 +68,89 @@ pub fn parse_delimiter<'a>(
     let (line, segment) = reader.peek_line_bytes()?;
 
     let c = line[0];
-    let mut j = 0;
     if segment.padding() != 0 || !processor.is_delimiter(c) {
         return None;
     }
+    let mut j = 0;
     while j < line.len() && c == line[j] {
         j += 1;
     }
-    if j >= minimum {
-        let precending = reader.precending_charater();
-        let after = char_at(&line, j).unwrap_or(' ');
-        let before_is_punct = is_unicode_symbol_or_punct(precending);
-        let before_is_space = is_unicode_space(precending);
-        let after_is_punct = is_unicode_symbol_or_punct(after);
-        let after_is_space = is_unicode_space(after);
-
-        let is_left = !after_is_space && (!after_is_punct || before_is_space || before_is_punct);
-        let is_right = !before_is_space && (!before_is_punct || after_is_space || after_is_punct);
-        let can_open = if c == b'_' {
-            is_left && (!is_right || before_is_punct)
-        } else {
-            is_left
-        };
-        let can_close = if c == b'_' {
-            is_right && (!is_left || after_is_punct)
-        } else {
-            is_right
-        };
-        reader.advance(j);
-        let delim = Delimiter::new(c, j, can_open, can_close, processor.clone());
-        let seg: Segment = (segment.start(), segment.start() + j).into();
-        let t = arena.new_node(Text::with_qualifiers(
-            text::Value::from_segment(seg, reader.decoder()),
-            TextQualifier::TEMP,
-        ));
-
-        ctx.delimiters_mut().push(delim, t);
-        return Some(t);
+    if j < minimum {
+        return None;
     }
-    None
+    let before = reader.precending_charater();
+    let after = char_at(&line, j).unwrap_or(' ');
+    let (before_is_space, before_is_punct) = char_class(before);
+    let (after_is_space, after_is_punct) = char_class(after);
+
+    let is_left = !after_is_space && (!after_is_punct || before_is_space || before_is_punct);
+    let is_right = !before_is_space && (!before_is_punct || after_is_space || after_is_punct);
+    let (can_open, can_close) = if c == b'_' {
+        (
+            is_left && (!is_right || before_is_punct),
+            is_right && (!is_left || after_is_punct),
+        )
+    } else {
+        (is_left, is_right)
+    };
+    Some(push_delimiter(
+        arena, reader, &segment, c, j, can_open, can_close, processor, ctx,
+    ))
+}
+
+/// A simpler implementation of [`ParseDelimiterFn`].
+///
+/// This function determines flankings based on original Markdown like simple rules:
+///
+/// - If the character after the delimiter is a space, the delimiter cannot open a span.
+/// - If the character before the delimiter is a space, the delimiter cannot close a span.
+///
+/// These rules are easy to understand even for non-engineer writers.
+/// While CommonMark rules do not work well with CJK, these rules often work well with CJK.
+pub fn parse_delimiter_simple<'a>(
+    arena: &mut Arena,
+    _parent_ref: NodeRef,
+    reader: &mut text::BlockReader<'a>,
+    minimum: usize,
+    processor: &DelimiterProcessor,
+    ctx: &mut Context,
+) -> Option<NodeRef> {
+    let (line, segment) = reader.peek_line_bytes()?;
+
+    let c = line[0];
+    if segment.padding() != 0 || !processor.is_delimiter(c) {
+        return None;
+    }
+    let mut j = 0;
+    while j < line.len() && c == line[j] {
+        j += 1;
+    }
+    if j < minimum {
+        return None;
+    }
+    let before = reader.precending_charater();
+    let after = char_at(&line, j).unwrap_or(' ');
+
+    let mut before_is_delimiter = false;
+    if let Some(last) = ctx.last_delimiter() {
+        if ctx.delimiters().elem(last).index(arena).stop() == segment.start() {
+            before_is_delimiter = true;
+            ctx.delimiters_mut().data_mut(last).can_close = true;
+        }
+    }
+    let is_left = !is_unicode_space(after);
+    let is_right = !is_unicode_space(before) || before_is_delimiter;
+    let (can_open, can_close) = if c == b'_' {
+        (
+            is_left && (!is_right || before_is_delimiter),
+            is_right && !is_left,
+        )
+    } else {
+        (is_left, is_right)
+    };
+    Some(push_delimiter(
+        arena, reader, &segment, c, j, can_open, can_close, processor, ctx,
+    ))
 }
 
 /// Processes the delimiter list in the context.

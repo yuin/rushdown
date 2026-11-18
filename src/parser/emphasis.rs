@@ -1,6 +1,9 @@
 use crate::{
     ast::{Arena, Emphasis, NodeRef, Strong},
-    parser::{parse_delimiter, Context, Delimiter, DelimiterProcessor, InlineParser},
+    parser::{
+        parse_delimiter, Context, Delimiter, DelimiterProcessor, InlineParser, Options,
+        ParseDelimiterFn,
+    },
     text::{self},
 };
 
@@ -8,6 +11,7 @@ use crate::{
 #[derive(Debug)]
 pub struct EmphasisParser {
     processor: DelimiterProcessor,
+    parse_delimiter: ParseDelimiterFn,
 }
 
 fn is_delimiter(c: u8) -> bool {
@@ -30,12 +34,23 @@ impl EmphasisParser {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Returns a new [`EmphasisParser`] with the given parser options.
+    pub fn with_options(options: Options) -> Self {
+        Self {
+            parse_delimiter: options.parse_delimiter.unwrap_or(parse_delimiter),
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for EmphasisParser {
     fn default() -> Self {
         let processor = DelimiterProcessor::new(is_delimiter, can_open_closer, on_match);
-        Self { processor }
+        Self {
+            processor,
+            parse_delimiter,
+        }
     }
 }
 
@@ -51,6 +66,6 @@ impl InlineParser for EmphasisParser {
         reader: &mut text::BlockReader,
         ctx: &mut Context,
     ) -> Option<NodeRef> {
-        parse_delimiter(arena, parent_ref, reader, 1, &self.processor, ctx)
+        (self.parse_delimiter)(arena, parent_ref, reader, 1, &self.processor, ctx)
     }
 }

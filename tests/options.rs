@@ -172,3 +172,24 @@ fn test_link_url_writer() {
     html::write_link_url(&mut out, "/a b?x=1&y=\"é").unwrap();
     assert_eq!(out, "/a%20b?x=1&amp;y=%22%C3%A9");
 }
+
+#[test]
+fn test_parse_delimiter_simple() {
+    let path = data_path("parse-delimiter-simple.txt");
+    let s = fs::read_to_string(&path).expect("failed to read parse-delimiter-simple.txt");
+    let suite = MarkdownTestSuite::with_str(s.as_str()).unwrap();
+    let markdown_to_html = new_markdown_to_html(
+        parser::Options {
+            parse_delimiter: Some(parser::parse_delimiter_simple),
+            ..Default::default()
+        },
+        html::Options {
+            allows_unsafe: true,
+            xhtml: true,
+            ..html::Options::default()
+        },
+        parser::NO_EXTENSIONS,
+        html::NO_EXTENSIONS,
+    );
+    suite.execute(&markdown_to_html)
+}

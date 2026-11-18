@@ -641,6 +641,11 @@ pub struct Options {
 
     /// A function that initializes the [`ContextKeyRegistry`] when the parser is created.
     pub context_key_registry_initializer: Option<Rc<dyn InitializeContextKeyRegistry>>,
+
+    /// A function for parsing delimiter runs of emphasis and strikethrough.
+    /// This defaults to [`parse_delimiter`]. [`parse_delimiter_simple`] is
+    /// an alternative that works better with CJK texts.
+    pub parse_delimiter: Option<ParseDelimiterFn>,
 }
 
 impl Debug for Options {
@@ -651,6 +656,7 @@ impl Debug for Options {
             .field("without_default_parsers", &self.without_default_parsers)
             .field("arena", &self.arena)
             .field("escaped_space", &self.escaped_space)
+            .field("parse_delimiter", &self.parse_delimiter.is_some())
             .field("id_generator", &"Option<Rc<dyn NodeIdGenerator>>")
             .field(
                 "context_key_registry_initializer",
@@ -946,7 +952,11 @@ impl Parser {
     fn add_default_inline_parsers(&mut self) {
         self.add_inline_parser(CodeSpanParser::new, NoParserOptions, PRIORITY_CODE_SPAN);
         self.add_inline_parser(RawHtmlParser::new, NoParserOptions, PRIORITY_RAW_HTML);
-        self.add_inline_parser(EmphasisParser::new, NoParserOptions, PRIORITY_EMPHASIS);
+        self.add_inline_parser(
+            EmphasisParser::with_options,
+            NoParserOptions,
+            PRIORITY_EMPHASIS,
+        );
         self.add_inline_parser(LinkParser::new, NoParserOptions, PRIORITY_LINK);
         self.add_inline_parser(AutoLinkParser::new, NoParserOptions, PRIORITY_AUTO_LINK);
     }
@@ -2686,7 +2696,7 @@ pub fn gfm_linkify(options: impl Into<LinkifyOptions>) -> impl ParserExtension {
 /// Returns a [`ParserExtension`] that adds GitHub Flavored Markdown (GFM) strikethrough support.
 pub fn gfm_strikethrough() -> impl ParserExtension {
     ParserExtensionFn::new(|p: &mut Parser| {
-        p.add_inline_parser(StrikethroughParser::new, NoParserOptions, 500);
+        p.add_inline_parser(StrikethroughParser::with_options, NoParserOptions, 500);
     })
 }
 

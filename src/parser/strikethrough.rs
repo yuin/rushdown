@@ -3,7 +3,10 @@ extern crate alloc;
 use crate::{
     as_kind_data,
     ast::{Arena, NodeRef, Strikethrough},
-    parser::{self, parse_delimiter, Delimiter, DelimiterProcessor, InlineParser},
+    parser::{
+        self, parse_delimiter, Delimiter, DelimiterProcessor, InlineParser, Options,
+        ParseDelimiterFn,
+    },
     text::{self, Reader},
 };
 
@@ -11,6 +14,7 @@ use crate::{
 #[derive(Debug)]
 pub struct StrikethroughParser {
     processor: DelimiterProcessor,
+    parse_delimiter: ParseDelimiterFn,
 }
 
 fn is_delimiter(c: u8) -> bool {
@@ -28,7 +32,10 @@ fn on_match(arena: &mut Arena, _consumes: usize) -> NodeRef {
 impl Default for StrikethroughParser {
     fn default() -> Self {
         let processor = DelimiterProcessor::new(is_delimiter, can_open_closer, on_match);
-        Self { processor }
+        Self {
+            processor,
+            parse_delimiter,
+        }
     }
 }
 
@@ -36,6 +43,14 @@ impl StrikethroughParser {
     /// Returns a new [`StrikethroughParser`].
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns a new [`StrikethroughParser`] with the given parser options.
+    pub fn with_options(options: Options) -> Self {
+        Self {
+            parse_delimiter: options.parse_delimiter.unwrap_or(parse_delimiter),
+            ..Self::default()
+        }
     }
 }
 
@@ -52,7 +67,7 @@ impl InlineParser for StrikethroughParser {
         ctx: &mut parser::Context,
     ) -> Option<NodeRef> {
         let precending = reader.precending_charater();
-        let text = parse_delimiter(arena, parent_ref, reader, 1, &self.processor, ctx)?;
+        let text = (self.parse_delimiter)(arena, parent_ref, reader, 1, &self.processor, ctx)?;
         let index = as_kind_data!(arena, text, Text).index()?;
         if index.len() > 2 || precending == '~' {
             return None;
