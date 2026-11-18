@@ -3,43 +3,299 @@
 extern crate alloc;
 
 use alloc::{borrow::Cow, string::String, vec::Vec};
-use core::ops::Range;
+use core::{fmt::Debug, ops::Range};
 
-use memchr::memchr;
+use memchr::{memchr, memchr2};
 
 #[allow(unused_imports)]
 #[cfg(all(not(feature = "std"), feature = "no-std-unix-debug"))]
 use crate::println;
-use crate::util::{self, is_blank, is_space, utf8_len, TinyVec};
+use crate::util::{
+    self, is_blank, is_space, try_resolve_entity_reference, try_resolve_numeric_reference,
+    try_unescape_punct, utf8_len, TinyVec, UnescapePunctResult,
+};
 
 const SPACE: &[u8] = b" ";
 
+// Decoder {{{
+
+/// A Decoder decodes a byte slice, e.g. resolving backslash escapes and
+/// character references.
+///
+/// Note that a decoder is not intended to 'normalize' a byte slice, but to decode it.
+/// For example, CommonMark requires that code spans normalize leading spaces, trailing spaces
+/// and newlines, but decoders do not do that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Decoder {
+    /// Decodes character references and backslash escapes.
+    ///
+    /// CommonMark defines texts except some inline elements (e.g., code span, auto link, etc)
+    /// can contain character references and backslash escapes.
+    ///
+    /// - decodes entity references (e.g., `&amp;` -> `&`)
+    /// - decodes numeric character references (e.g., `&#x26;` -> `&`)
+    /// - decodes `\` escaped punctuations (e.g., `\*` -> `*`)
+    #[default]
+    Default,
+
+    /// Same as [`Decoder::Default`], but also decodes a halfspace escaped by backslash
+    /// to an empty string.
+    EscapedSpace,
+
+    /// Does not perform any decoding and returns the bytes as is.
+    Identity,
+}
+
+impl Decoder {
+    /// Returns [`Decoder::EscapedSpace`] if `escaped_space` is true, otherwise
+    /// [`Decoder::Default`].
+    pub fn new(escaped_space: bool) -> Self {
+        if escaped_space {
+            Decoder::EscapedSpace
+        } else {
+            Decoder::Default
+        }
+    }
+
+    /// Decodes the given byte slice and returns the decoded bytes.
+    pub fn decode<'a>(&self, b: Cow<'a, [u8]>) -> Cow<'a, [u8]> {
+        let escaped_space = match self {
+            Decoder::Identity => return b,
+            Decoder::Default => false,
+            Decoder::EscapedSpace => true,
+        };
+        let Some(mut i) = memchr2(b'\\', b'&', &b) else {
+            return b;
+        };
+        let bytes: &[u8] = &b;
+        let mut result: Vec<u8> = Vec::with_capacity(bytes.len());
+        let mut n = 0usize;
+        let mut changed = false;
+        loop {
+            let c = bytes[i];
+            let mut next = i + 1;
+            if c == b'\\' {
+                match try_unescape_punct(bytes, i, escaped_space) {
+                    UnescapePunctResult::Punct(nbyte, ch) => {
+                        result.extend_from_slice(&bytes[n..i]);
+                        result.push(ch);
+                        next = i + nbyte + 1;
+                        n = next;
+                        changed = true;
+                    }
+                    UnescapePunctResult::Skipped(nbyte) => {
+                        result.extend_from_slice(&bytes[n..i]);
+                        next = i + nbyte + 1;
+                        n = next;
+                        changed = true;
+                    }
+                    UnescapePunctResult::None => {}
+                }
+            } else if let Some((nbyte, ch)) = try_resolve_numeric_reference(bytes, i) {
+                result.extend_from_slice(&bytes[n..i]);
+                let mut buf = [0u8; 4];
+                result.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+                next = i + nbyte + 1;
+                n = next;
+                changed = true;
+            } else if let Some((nbyte, rep)) = try_resolve_entity_reference(bytes, i) {
+                result.extend_from_slice(&bytes[n..i]);
+                result.extend_from_slice(rep.as_bytes());
+                next = i + nbyte + 1;
+                n = next;
+                changed = true;
+            }
+            match bytes.get(next..).and_then(|r| memchr2(b'\\', b'&', r)) {
+                Some(rel) => i = next + rel,
+                None => break,
+            }
+        }
+        if !changed {
+            return b;
+        }
+        result.extend_from_slice(&bytes[n..]);
+        Cow::Owned(result)
+    }
+}
+
+// }}} Decoder
+
 // Value {{{
+
+/// A value for inline codes.
+///
+/// This value normalizes its content: line endings are converted to spaces.
+/// Stripping a leading and a trailing space is the responsibility of the creator.
+/// This value is never decoded.
+#[derive(Debug, Clone)]
+pub struct CodeSpanValue {
+    indices: TinyVec<Index>,
+    string: Option<String>,
+}
+
+impl CodeSpanValue {
+    /// Creates a new [`CodeSpanValue`] backed by the source.
+    pub fn from_indices(indices: impl Into<TinyVec<Index>>) -> Self {
+        Self {
+            indices: indices.into(),
+            string: None,
+        }
+    }
+
+    /// Creates a new [`CodeSpanValue`] backed by the given string.
+    pub fn from_string(s: impl Into<String>) -> Self {
+        Self {
+            indices: TinyVec::empty(),
+            string: Some(s.into()),
+        }
+    }
+
+    /// Returns indices of this value if this value is backed by the source.
+    pub fn indices(&self) -> Option<&[Index]> {
+        match &self.string {
+            Some(_) => None,
+            None => Some(self.indices.as_slice()),
+        }
+    }
+
+    /// Returns the source bytes of this value without normalization.
+    pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
+        match &self.string {
+            Some(s) => Cow::Borrowed(s.as_bytes()),
+            None => match (self.indices.get(0), self.indices.get(1)) {
+                (None, _) => Cow::Borrowed(&[]),
+                (Some(f), None) => Cow::Borrowed(f.bytes(source)),
+                _ => {
+                    let mut v = Vec::new();
+                    for idx in self.indices.iter() {
+                        v.extend_from_slice(idx.bytes(source));
+                    }
+                    Cow::Owned(v)
+                }
+            },
+        }
+    }
+
+    /// Returns the normalized string value.
+    pub fn value<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
+        let bytes = self.bytes(source);
+        if memchr(b'\n', &bytes).is_none() {
+            return match bytes {
+                Cow::Borrowed(b) => Cow::Borrowed(unsafe { core::str::from_utf8_unchecked(b) }),
+                Cow::Owned(v) => Cow::Owned(unsafe { String::from_utf8_unchecked(v) }),
+            };
+        }
+        let mut v = bytes.into_owned();
+        for b in v.iter_mut() {
+            if *b == b'\n' {
+                *b = b' ';
+            }
+        }
+        Cow::Owned(unsafe { String::from_utf8_unchecked(v) })
+    }
+
+    /// Returns true if the value is empty, otherwise false.
+    pub fn is_empty(&self) -> bool {
+        match &self.string {
+            Some(s) => s.is_empty(),
+            None => self.indices.iter().all(|i| i.is_empty()),
+        }
+    }
+
+    /// Returns the length of the raw value in bytes.
+    pub fn len(&self) -> usize {
+        match &self.string {
+            Some(s) => s.len(),
+            None => self.indices.iter().map(|i| i.len()).sum(),
+        }
+    }
+}
+
+//   }}} ExtensionValue
 
 //   Value {{{
 
 /// An enum represents a string value that can be either an [`Index`], a collection of
-/// [`Index`]s, or a [`String`].
+/// [`Index`]s, or a [`String`]. [`Value::Empty`] represents the absence of a value.
 /// [`Value`] does not handle padding.
-#[derive(Debug, Clone)]
+///
+/// [`Value::Index`], [`Value::Indices`] and [`Value::String`] have a [`Decoder`]:
+///
+/// - [`Value::bytes`] and [`Value::str`] return the value without decoding and normalization.
+/// - [`Value::value`] returns the decoded and normalized value.
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub enum Value {
+    /// An Empty variant represents the absence of a value.
+    #[default]
+    Empty,
+
     /// An Index variant holds a reference to indicies in the source.
-    Index(Index),
+    Index(Index, Decoder),
 
     /// An Indices variant holds a collection of indices whose concatenation forms the value.
-    Indices(TinyVec<Index>),
+    Indices(TinyVec<Index>, Decoder),
 
     /// A String variant holds a string value.
-    String(String),
+    String(String, Decoder),
+
+    /// A CodeSpan variant holds a value of an inline code. This value normalizes its content by
+    /// itself and is never decoded.
+    CodeSpan(CodeSpanValue),
 }
 
 impl Value {
+    /// Creates a new value backed by the given index and decoder.
+    pub fn from_index(index: Index, decoder: Decoder) -> Self {
+        Value::Index(index, decoder)
+    }
+
+    /// Creates a new value backed by the given segment and decoder.
+    pub fn from_segment(segment: Segment, decoder: Decoder) -> Self {
+        Value::Index(Index::new(segment.start(), segment.stop()), decoder)
+    }
+
+    /// Creates a new value backed by the given indices and decoder.
+    pub fn from_indices(indices: TinyVec<Index>, decoder: Decoder) -> Self {
+        match (indices.get(0), indices.get(1)) {
+            (Some(f), None) => Value::Index(*f, decoder),
+            (None, _) => Value::Empty,
+            _ => Value::Indices(indices, decoder),
+        }
+    }
+
+    /// Creates a new value backed by the given string and decoder.
+    pub fn from_string(s: impl Into<String>, decoder: Decoder) -> Self {
+        Value::String(s.into(), decoder)
+    }
+
+    /// Returns the decoder of this value.
+    /// Values that do not have a decoder return [`Decoder::Identity`].
+    pub fn decoder(&self) -> Decoder {
+        match self {
+            Value::Index(_, d) | Value::Indices(_, d) | Value::String(_, d) => *d,
+            _ => Decoder::Identity,
+        }
+    }
+
+    /// Returns a new value that has the given decoder.
+    /// Values that do not have a decoder are returned as they are.
+    pub fn with_decoder(self, decoder: Decoder) -> Self {
+        match self {
+            Value::Index(i, _) => Value::Index(i, decoder),
+            Value::Indices(i, _) => Value::Indices(i, decoder),
+            Value::String(s, _) => Value::String(s, decoder),
+            v => v,
+        }
+    }
+
     /// Returns byte slice value by concatenating all indices in the collection.
+    /// The returned value is neither decoded nor normalized.
     pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
         match self {
-            Value::Index(index) => Cow::Borrowed(index.bytes(source)),
-            Value::Indices(indices) => match (indices.get(0), indices.get(1)) {
+            Value::Empty => Cow::Borrowed(&[]),
+            Value::Index(index, _) => Cow::Borrowed(index.bytes(source)),
+            Value::Indices(indices, _) => match (indices.get(0), indices.get(1)) {
                 (Some(f), None) => Cow::Borrowed(f.bytes(source)),
                 (None, _) => Cow::Borrowed(&[]),
                 _ => {
@@ -50,125 +306,89 @@ impl Value {
                     Cow::Owned(result)
                 }
             },
-            Value::String(s) => Cow::Borrowed(s.as_bytes()),
+            Value::String(s, _) => Cow::Borrowed(s.as_bytes()),
+            Value::CodeSpan(c) => c.bytes(source),
         }
     }
 
     /// Returns str value by concatenating all indices in the collection.
+    /// The returned value is neither decoded nor normalized.
     pub fn str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
+        match self.bytes(source) {
+            Cow::Borrowed(b) => Cow::Borrowed(unsafe { core::str::from_utf8_unchecked(b) }),
+            Cow::Owned(v) => Cow::Owned(unsafe { String::from_utf8_unchecked(v) }),
+        }
+    }
+
+    /// Returns the decoded and normalized bytes.
+    pub fn value_bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
         match self {
-            Value::Index(index) => Cow::Borrowed(index.str(source)),
-            Value::Indices(indices) => match (indices.get(0), indices.get(1)) {
-                (Some(f), None) => Cow::Borrowed(f.str(source)),
-                (None, _) => Cow::Borrowed(""),
-                _ => {
-                    let mut result = String::new();
-                    for idx in indices.iter() {
-                        result.push_str(idx.str(source));
-                    }
-                    Cow::Owned(result)
-                }
+            Value::CodeSpan(c) => match c.value(source) {
+                Cow::Borrowed(s) => Cow::Borrowed(s.as_bytes()),
+                Cow::Owned(s) => Cow::Owned(s.into_bytes()),
             },
-            Value::String(s) => Cow::Borrowed(s.as_str()),
+            _ => self.decoder().decode(self.bytes(source)),
+        }
+    }
+
+    /// Returns the decoded and normalized string value.
+    pub fn value<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
+        match self.value_bytes(source) {
+            Cow::Borrowed(b) => Cow::Borrowed(unsafe { core::str::from_utf8_unchecked(b) }),
+            Cow::Owned(v) => Cow::Owned(unsafe { String::from_utf8_unchecked(v) }),
         }
     }
 
     /// Returns true if the value is empty, otherwise false.
     pub fn is_empty(&self) -> bool {
         match self {
-            Value::Index(index) => index.is_empty(),
-            Value::Indices(indices) => indices.iter().all(|i| i.is_empty()),
-            Value::String(s) => s.is_empty(),
+            Value::Empty => true,
+            Value::Index(index, _) => index.is_empty(),
+            Value::Indices(indices, _) => indices.iter().all(|i| i.is_empty()),
+            Value::String(s, _) => s.is_empty(),
+            Value::CodeSpan(c) => c.is_empty(),
         }
     }
 
     /// Returns the length of the value.
     pub fn len(&self) -> usize {
         match self {
-            Value::Index(index) => index.len(),
-            Value::Indices(indices) => indices.iter().map(|i| i.len()).sum(),
-            Value::String(s) => s.len(),
+            Value::Empty => 0,
+            Value::Index(index, _) => index.len(),
+            Value::Indices(indices, _) => indices.iter().map(|i| i.len()).sum(),
+            Value::String(s, _) => s.len(),
+            Value::CodeSpan(c) => c.len(),
         }
     }
-}
 
-impl From<&str> for Value {
-    fn from(s: &str) -> Self {
-        Value::String(String::from(s))
+    /// Returns `None` if this value is empty, otherwise `Some(&self)`.
+    pub fn as_option(&self) -> Option<&Value> {
+        if self.is_empty() {
+            None
+        } else {
+            Some(self)
+        }
     }
-}
 
-impl From<&String> for Value {
-    fn from(s: &String) -> Self {
-        Value::String(s.clone())
-    }
-}
-
-impl From<String> for Value {
-    fn from(s: String) -> Self {
-        Value::String(s)
-    }
-}
-
-impl From<&[u8]> for Value {
-    fn from(s: &[u8]) -> Self {
-        Value::String(String::from_utf8_lossy(s).into_owned())
-    }
-}
-
-impl From<Vec<u8>> for Value {
-    fn from(s: Vec<u8>) -> Self {
-        Value::String(String::from_utf8_lossy(&s).into_owned())
-    }
-}
-
-impl From<&[char]> for Value {
-    fn from(s: &[char]) -> Self {
-        Value::String(s.iter().collect())
-    }
-}
-
-impl From<Cow<'_, [u8]>> for Value {
-    fn from(s: Cow<'_, [u8]>) -> Self {
-        Value::String(String::from_utf8_lossy(&s).into_owned())
-    }
-}
-
-impl From<Cow<'_, str>> for Value {
-    fn from(s: Cow<'_, str>) -> Self {
-        Value::String(s.into_owned())
+    /// Returns `None` if this value is empty, otherwise `Some(self)`.
+    pub fn into_option(self) -> Option<Value> {
+        if self.is_empty() {
+            None
+        } else {
+            Some(self)
+        }
     }
 }
 
 impl From<&Value> for Value {
     fn from(v: &Value) -> Self {
-        match v {
-            Value::Index(index) => Value::Index(*index),
-            Value::Indices(indices) => Value::Indices(indices.clone()),
-            Value::String(s) => Value::String(s.clone()),
-        }
+        v.clone()
     }
 }
 
-impl From<TinyVec<Index>> for Value {
-    fn from(indices: TinyVec<Index>) -> Self {
-        match (indices.get(0), indices.get(1)) {
-            (Some(f), None) => Value::Index(*f),
-            (None, _) => Value::Index(Index::new(0, 0)),
-            _ => Value::Indices(indices),
-        }
-    }
-}
-
-impl From<(usize, usize)> for Value {
-    fn from((start, stop): (usize, usize)) -> Self {
-        Value::Index(Index::new(start, stop))
-    }
-}
-
-impl From<Segment> for Value {
-    fn from(segment: Segment) -> Self {
-        Value::Index(Index::new(segment.start(), segment.stop()))
+impl From<CodeSpanValue> for Value {
+    fn from(v: CodeSpanValue) -> Self {
+        Value::CodeSpan(v)
     }
 }
 //   }}} Value
@@ -238,12 +458,6 @@ impl Index {
     #[inline(always)]
     pub const fn len(&self) -> usize {
         self.stop - self.start
-    }
-}
-
-impl From<Index> for Value {
-    fn from(index: Index) -> Self {
-        Value::Index(index)
     }
 }
 
@@ -401,38 +615,25 @@ const fn binary_search_block_pos(block: &Block, pos: usize) -> Option<usize> {
 /// Extension trait for [`Block`].
 pub trait BlockExt {
     /// Returns a collection of values by converting each segment in the block to a value.
-    fn to_values(&self) -> Value;
+    fn to_values(&self, decoder: Decoder) -> Value;
 }
 
 impl BlockExt for Block {
-    fn to_values(&self) -> Value {
-        let first = self.first();
-        let second = self.get(1);
-        if let Some(f) = first {
-            if second.is_none() {
-                return Value::Index((f.start(), f.stop()).into());
-            }
-        } else {
-            return Value::Index(Index::new(0, 0));
-        }
-        let mut result = Vec::with_capacity(self.len());
-        for v in self.iter() {
-            result.push((v.start(), v.stop()).into());
-        }
-        Value::Indices(TinyVec::from_vec(result))
+    fn to_values(&self, decoder: Decoder) -> Value {
+        block_to_values(self.iter().copied(), decoder)
     }
 }
 
-pub(crate) fn block_to_values(i: impl IntoIterator<Item = Segment>) -> Value {
+pub(crate) fn block_to_values(i: impl IntoIterator<Item = Segment>, decoder: Decoder) -> Value {
     let mut b = i.into_iter();
     let first = b.next();
     let second = b.next();
     if let Some(f) = first {
         if second.is_none() {
-            return Value::Index(f.into());
+            return Value::from_segment(f, decoder);
         }
     } else {
-        return Value::Index(Index::new(0, 0));
+        return Value::Empty;
     }
     let mut result = Vec::with_capacity(2 + b.size_hint().0);
     result.push(first.unwrap().into());
@@ -440,7 +641,7 @@ pub(crate) fn block_to_values(i: impl IntoIterator<Item = Segment>) -> Value {
     for segment in b {
         result.push(segment.into());
     }
-    Value::Indices(TinyVec::from_vec(result))
+    Value::Indices(TinyVec::from_vec(result), decoder)
 }
 
 //   }}} Block
@@ -700,6 +901,9 @@ pub trait Reader<'a> {
     /// Returns the source str.
     fn source(&self) -> &'a str;
 
+    /// Returns the [`Decoder`] that will be bound to values created from this reader.
+    fn decoder(&self) -> Decoder;
+
     /// Returns current line number and position.
     fn position(&self) -> (usize, Segment);
 
@@ -804,11 +1008,17 @@ pub struct BasicReader<'a> {
     pos: Segment,
     head: usize,
     line_offset: Option<usize>,
+    decoder: Decoder,
 }
 
 impl<'a> BasicReader<'a> {
     /// Creates a new BasicReader with the given source.
     pub fn new(source: &'a str) -> Self {
+        Self::with_decoder(source, Decoder::Default)
+    }
+
+    /// Creates a new BasicReader with the given source and decoder.
+    pub fn with_decoder(source: &'a str, decoder: Decoder) -> Self {
         let bsource: &[u8] = source.as_bytes();
         let source_length = bsource.len();
         let mut b = BasicReader {
@@ -819,23 +1029,20 @@ impl<'a> BasicReader<'a> {
             pos: Segment::new(0, 0),
             head: 0,
             line_offset: None,
+            decoder,
         };
         b.reset_position();
         b
-    }
-
-    /// Creates a new BasicReader with the given byte slice without UTF-8 validation.
-    ///
-    /// # Safety
-    /// - The caller must ensure that the given byte slice is valid UTF-8.
-    pub unsafe fn new_unchecked(source: &'a [u8]) -> Self {
-        Self::new(core::str::from_utf8_unchecked(source))
     }
 }
 
 impl<'a> Reader<'a> for BasicReader<'a> {
     fn source(&self) -> &'a str {
         self.source
+    }
+
+    fn decoder(&self) -> Decoder {
+        self.decoder
     }
 
     fn position(&self) -> (usize, Segment) {
@@ -1041,11 +1248,17 @@ pub struct BlockReader<'a> {
     head: usize,
     last: usize,
     line_offset: Option<usize>,
+    decoder: Decoder,
 }
 
 impl<'a> BlockReader<'a> {
     /// Creates a new BlockReader with the given source and block.
     pub fn new(source: &'a str, block: &'a Block) -> Self {
+        Self::with_decoder(source, block, Decoder::Default)
+    }
+
+    /// Creates a new BlockReader with the given source, block and decoder.
+    pub fn with_decoder(source: &'a str, block: &'a Block, decoder: Decoder) -> Self {
         let mut b = BlockReader {
             source,
             bsource: source.as_bytes(),
@@ -1055,17 +1268,10 @@ impl<'a> BlockReader<'a> {
             head: 0,
             last: 0,
             line_offset: None,
+            decoder,
         };
         b.reset(block);
         b
-    }
-
-    /// Creates a new BlockReader with the given byte slice without UTF-8 validation.
-    ///
-    /// # Safety
-    /// - The caller must ensure that the given byte slice is valid UTF-8.
-    pub unsafe fn new_unchecked(source: &'a [u8], block: &'a Block) -> Self {
-        Self::new(core::str::from_utf8_unchecked(source), block)
     }
 
     /// Resets the reader with given new block.
@@ -1080,25 +1286,30 @@ impl<'a> BlockReader<'a> {
         if line == self.line.unwrap_or(0) {
             let seg = self.block[line];
             if pos.start() >= seg.start() && self.pos.start() <= seg.stop() {
-                return block_to_values(BetweenBlockIterator::single(
-                    pos.start()..self.pos.start(),
-                ));
+                return block_to_values(
+                    BetweenBlockIterator::single(pos.start()..self.pos.start()),
+                    self.decoder,
+                );
             }
         }
-        block_to_values(BetweenBlockIterator::multi(
-            BlockReader {
-                source: self.source,
-                bsource: self.bsource,
-                block: self.block,
-                line: self.line,
-                pos: self.pos,
-                head: self.head,
-                last: self.last,
-                line_offset: self.line_offset,
-            },
-            line,
-            pos,
-        ))
+        block_to_values(
+            BetweenBlockIterator::multi(
+                BlockReader {
+                    source: self.source,
+                    bsource: self.bsource,
+                    block: self.block,
+                    line: self.line,
+                    pos: self.pos,
+                    head: self.head,
+                    last: self.last,
+                    line_offset: self.line_offset,
+                    decoder: self.decoder,
+                },
+                line,
+                pos,
+            ),
+            self.decoder,
+        )
     }
 
     /// Returns Values that contains segments between the given range.
@@ -1106,7 +1317,7 @@ impl<'a> BlockReader<'a> {
         let from_line = binary_search_block_pos(self.block, range.start).unwrap_or(0);
         let mut from_pos = self.block[from_line];
         if range.start >= from_pos.start() && range.end <= from_pos.stop() {
-            return block_to_values(BetweenBlockIterator::single(range));
+            return block_to_values(BetweenBlockIterator::single(range), self.decoder);
         }
         let to_line =
             binary_search_block_pos(self.block, range.end).unwrap_or(self.block.len() - 1);
@@ -1114,20 +1325,24 @@ impl<'a> BlockReader<'a> {
         to_pos.start = range.end;
         from_pos.start = range.start;
 
-        block_to_values(BetweenBlockIterator::multi(
-            BlockReader {
-                source: self.source,
-                bsource: self.bsource,
-                block: self.block,
-                line: Some(to_line),
-                pos: to_pos,
-                head: 0,
-                last: 0,
-                line_offset: None,
-            },
-            from_line,
-            from_pos,
-        ))
+        block_to_values(
+            BetweenBlockIterator::multi(
+                BlockReader {
+                    source: self.source,
+                    bsource: self.bsource,
+                    block: self.block,
+                    line: Some(to_line),
+                    pos: to_pos,
+                    head: 0,
+                    last: 0,
+                    line_offset: None,
+                    decoder: self.decoder,
+                },
+                from_line,
+                from_pos,
+            ),
+            self.decoder,
+        )
     }
 }
 
@@ -1210,6 +1425,10 @@ impl<'a> Iterator for BetweenBlockIterator<'a> {
 impl<'a> Reader<'a> for BlockReader<'a> {
     fn source(&self) -> &'a str {
         self.source
+    }
+
+    fn decoder(&self) -> Decoder {
+        self.decoder
     }
 
     fn position(&self) -> (usize, Segment) {
@@ -1460,6 +1679,40 @@ mod tests {
     #[cfg(all(not(feature = "std"), feature = "no-std-unix-debug"))]
     use crate::println;
 
+    fn dec(d: Decoder, s: &str) -> String {
+        String::from_utf8(d.decode(Cow::Borrowed(s.as_bytes())).into_owned()).unwrap()
+    }
+
+    #[test]
+    fn test_decoder() {
+        let d = Decoder::Default;
+        assert_eq!(dec(d, "a \\* b &amp; &#35; &#x41; &copy;"), "a * b & # A ©");
+        assert_eq!(dec(d, "\\&amp;"), "&amp;");
+        assert_eq!(dec(d, "\\a &unknown; &#; \\"), "\\a &unknown; &#; \\");
+        assert_eq!(dec(Decoder::Identity, "\\* &amp;"), "\\* &amp;");
+        assert!(matches!(
+            Decoder::Default.decode(Cow::Borrowed(b"plain")),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn test_decoder_pathological_input() {
+        let s = "&".repeat(100_000) + &"\\".repeat(100_000);
+        assert_eq!(dec(Decoder::Default, &s).len(), 150_000);
+    }
+
+    #[test]
+    fn test_value_decoding() {
+        let v = Value::from_string(String::from("a &amp; b"), Decoder::Default);
+        assert_eq!(v.value(""), "a & b");
+        assert_eq!(v.str(""), "a &amp; b");
+        let v = Value::from_string(String::from("a &amp; b"), Decoder::Identity);
+        assert_eq!(v.value(""), "a &amp; b");
+        let v: Value = CodeSpanValue::from_string(String::from("a\nb &amp;")).into();
+        assert_eq!(v.value(""), "a b &amp;");
+    }
+
     #[test]
     fn test_segment() {
         let buffer = "Hello, world!";
@@ -1475,16 +1728,16 @@ mod tests {
     #[test]
     fn test_raw() {
         let buffer = "Hello, world!";
-        let index = Value::from((0, 5));
+        let index = Value::Index(Index::new(0, 5), Decoder::Default);
         assert_eq!(index.bytes(buffer), b"Hello".as_slice());
 
-        let raw_string = Value::from("Hello");
+        let raw_string = Value::from_string(String::from("Hello"), Decoder::Default);
         assert_eq!(raw_string.bytes(buffer), b"Hello".as_slice());
 
         assert_eq!(index.str(buffer), "Hello");
 
         let string = String::from("Hello");
-        let v = Value::from(string.as_str());
+        let v = Value::from_string(string, Decoder::Default);
         assert_eq!(v.str(buffer), "Hello");
     }
 

@@ -167,17 +167,25 @@ impl InlineParser for LinkifyParser {
                 Some(mut p) => {
                     p.push_str("://");
                     p.push_str(unsafe { core::str::from_utf8_unchecked(label) });
-                    p.into()
+                    text::Value::from_string(p, text::Decoder::Identity)
                 }
-                None => seg.into(),
+                None => text::Value::from_segment(seg, text::Decoder::Identity),
             };
-            let auto_link_ref = arena.new_node(Link::auto(dest, seg));
-            let text_ref =
-                arena.new_node(Text::new(unsafe { core::str::from_utf8_unchecked(label) }));
+            let auto_link_ref = arena.new_node(Link::auto(
+                dest,
+                text::Value::from_segment(seg, text::Decoder::Identity),
+            ));
+            let text_ref = arena.new_node(Text::new(text::Value::from_string(
+                unsafe { core::str::from_utf8_unchecked(label) }.to_string(),
+                text::Decoder::Identity,
+            )));
             auto_link_ref.append_child_fast(arena, text_ref);
             if start != 0 {
-                parent_ref
-                    .merge_or_append_text(arena, (segment.start(), segment.start() + start).into());
+                parent_ref.merge_or_append_text(
+                    arena,
+                    (segment.start(), segment.start() + start).into(),
+                    reader.decoder(),
+                );
             }
             reader.advance(start + (stop - start));
             return Some(auto_link_ref);
@@ -201,15 +209,24 @@ impl InlineParser for LinkifyParser {
         }
         stop -= trim_right_length(&line[..stop], b"?!.,:*_~");
         if start != 0 {
-            parent_ref
-                .merge_or_append_text(arena, (segment.start(), segment.start() + start).into());
+            parent_ref.merge_or_append_text(
+                arena,
+                (segment.start(), segment.start() + start).into(),
+                reader.decoder(),
+            );
         }
         let label = unsafe { core::str::from_utf8_unchecked(&line[start..stop]) };
         let seg: Segment = (segment.start() + start, segment.start() + stop).into();
         let mut dest = "mailto:".to_string();
         dest.push_str(label);
-        let auto_link_ref = arena.new_node(Link::auto(dest, seg));
-        let text_ref = arena.new_node(Text::new(label));
+        let auto_link_ref = arena.new_node(Link::auto(
+            text::Value::from_string(dest, text::Decoder::Identity),
+            text::Value::from_segment(seg, text::Decoder::Identity),
+        ));
+        let text_ref = arena.new_node(Text::new(text::Value::from_string(
+            label.to_string(),
+            text::Decoder::Identity,
+        )));
         auto_link_ref.append_child_fast(arena, text_ref);
         reader.advance(start + (stop - start));
         Some(auto_link_ref)

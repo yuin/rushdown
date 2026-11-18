@@ -292,7 +292,7 @@ pub(crate) fn scan_html_block_open_7(line: &[u8]) -> Option<()> {
 }
 
 pub(crate) fn scan_html_attributes(s: &[u8]) -> Option<usize> {
-    let mut r = unsafe { text::BasicReader::new_unchecked(s) };
+    let mut r = text::BasicReader::new(unsafe { core::str::from_utf8_unchecked(s) });
     if scan_html_attributes_reader(&mut r).is_some() {
         Some(r.position().1.start())
     } else {

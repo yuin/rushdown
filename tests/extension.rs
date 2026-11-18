@@ -92,10 +92,11 @@ impl InlineParser for UserMentionParser {
         while username_end < line.len() && line[username_end].is_ascii_alphanumeric() {
             username_end += 1;
         }
-        let username: text::Value = seg
-            .with_start(seg.start() + 1)
-            .with_stop(seg.start() + username_end)
-            .into();
+        let username = text::Value::from_segment(
+            seg.with_start(seg.start() + 1)
+                .with_stop(seg.start() + username_end),
+            reader.decoder(),
+        );
         reader.advance(username_end - 1);
         let node_ref = arena.new_node(UserMention::new(username));
         Some(node_ref)
@@ -328,7 +329,11 @@ impl AstTransformer for AdmonitionAstTransformer {
                             let children: Vec<NodeRef> =
                                 arena[bq_ref].children(arena).skip(1).collect();
                             let ad_title_ref = arena.new_node(Paragraph::new());
-                            let text_node_ref = arena.new_node(Text::new(kind.to_uppercase()));
+                            let text_node_ref =
+                                arena.new_node(Text::new(text::Value::from_string(
+                                    kind.to_uppercase(),
+                                    text::Decoder::Identity,
+                                )));
                             ad_title_ref.append_child(arena, text_node_ref);
                             admonition_node_ref.append_child(arena, ad_title_ref);
                             for child_ref in children {

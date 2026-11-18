@@ -40,7 +40,8 @@ impl BlockParser for IndentedCodeBlockParser {
             return None;
         }
         let (pos, padding) = indent_position(line.as_ref(), reader.line_offset(), 4)?;
-        let code_block_ref = arena.new_node(CodeBlock::new(CodeBlockKind::Indented, None));
+        let code_block_ref =
+            arena.new_node(CodeBlock::new(CodeBlockKind::Indented, text::Value::Empty));
         reader.advance_and_set_padding(pos, padding);
         let mut segment = reader.peek_line_segment().unwrap();
         // if code block line starts with a tab, keep a tab as it is.
@@ -159,11 +160,17 @@ impl BlockParser for FencedCodeBlockParser {
                 if fdata.char == b'`' && memchr::memchr(b'`', value).is_some() {
                     return None;
                 } else if info_start != info_stop {
-                    info = Some((info_start, info_stop).into());
+                    info = Some(text::Value::from_segment(
+                        Segment::new(info_start, info_stop),
+                        reader.decoder(),
+                    ));
                 }
             }
         }
-        let node_ref = arena.new_node(CodeBlock::new(CodeBlockKind::Fenced, info));
+        let node_ref = arena.new_node(CodeBlock::new(
+            CodeBlockKind::Fenced,
+            info.unwrap_or(text::Value::Empty),
+        ));
         as_kind_data_mut!(arena, node_ref, CodeBlock).set_fence_data(fdata);
         Some((node_ref, State::NO_CHILDREN))
     }

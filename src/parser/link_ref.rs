@@ -33,7 +33,7 @@ impl ParagraphTransformer for LinkReferenceParagraphTransformer {
         context: &mut Context,
     ) {
         let mut lines = as_type_data_mut!(arena, paragraph_ref, Block).take_source();
-        let mut block = text::BlockReader::new(reader.source(), &lines);
+        let mut block = text::BlockReader::with_decoder(reader.source(), &lines, reader.decoder());
         let mut removes = Vec::<(NodeRef, usize, usize)>::new();
         while let Some((link_ref, start, mut end)) = parse_link_reference_definition(
             arena,
@@ -144,7 +144,9 @@ fn parse_link_reference_definition<'a>(
         let link_ref = arena.new_node(LinkReferenceDefinition::new(label, destination));
         parent.insert_before(arena, paragraph, link_ref);
         ctx.add_link_reference(
-            as_kind_data!(arena, link_ref, LinkReferenceDefinition).label_str(reader.source()),
+            as_kind_data!(arena, link_ref, LinkReferenceDefinition)
+                .label()
+                .str(reader.source()),
             link_ref,
         );
         let (end_line, _) = reader.position();
@@ -169,7 +171,9 @@ fn parse_link_reference_definition<'a>(
         let link_ref = arena.new_node(LinkReferenceDefinition::new(label, destination));
         parent.insert_before(arena, paragraph, link_ref);
         ctx.add_link_reference(
-            as_kind_data!(arena, link_ref, LinkReferenceDefinition).label_str(reader.source()),
+            as_kind_data!(arena, link_ref, LinkReferenceDefinition)
+                .label()
+                .str(reader.source()),
             link_ref,
         );
         let (end_line, _) = reader.position();
@@ -179,7 +183,9 @@ fn parse_link_reference_definition<'a>(
         let link_ref = arena.new_node(LinkReferenceDefinition::with_title(label, destination, t));
         parent.insert_before(arena, paragraph, link_ref);
         ctx.add_link_reference(
-            as_kind_data!(arena, link_ref, LinkReferenceDefinition).label_str(reader.source()),
+            as_kind_data!(arena, link_ref, LinkReferenceDefinition)
+                .label()
+                .str(reader.source()),
             link_ref,
         );
         let (end_line, _) = reader.position();

@@ -30,13 +30,13 @@
 //! let paragraph_ref = arena.new_node(Paragraph::new());
 //! let seg = Segment::new(0, source.len());
 //! as_type_data_mut!(&mut arena[paragraph_ref], Block).append_source_line(seg);
-//! let text_ref = arena.new_node(Text::new(seg));
+//! let text_ref = arena.new_node(Text::new(rushdown::text::Value::from_segment(seg, rushdown::text::Decoder::Identity)));
 //! paragraph_ref.append_child(&mut arena, text_ref);
 //! doc_ref.append_child(&mut arena, paragraph_ref);
 //!
 //! assert_eq!(arena[paragraph_ref].first_child().unwrap(), text_ref);
 //! assert_eq!(
-//!     as_kind_data!(&arena[text_ref], Text).str(source),
+//!     as_kind_data!(&arena[text_ref], Text).value().str(source),
 //!     "Hello, World!"
 //! );
 //! assert_eq!(
@@ -467,28 +467,41 @@ impl NodeRef {
     // # Panics
     // Panics if the operation fails(e.g. due to invalid NodeRef).
     #[inline(always)]
-    pub fn merge_or_append_text(self, arena: &mut Arena, index: text::Index) {
-        self.try_merge_or_append_text(arena, index).unwrap();
+    pub(crate) fn merge_or_append_text(
+        self,
+        arena: &mut Arena,
+        index: text::Index,
+        decoder: text::Decoder,
+    ) {
+        self.try_merge_or_append_text(arena, index, decoder)
+            .unwrap();
     }
 
     // Merges a given index into the last child of this node if
     // it can be merged, otherwise creates a new Text node and appends it to after current
     // last child.
-    pub fn try_merge_or_append_text(self, arena: &mut Arena, index: text::Index) -> Result<()> {
+    pub(crate) fn try_merge_or_append_text(
+        self,
+        arena: &mut Arena,
+        index: text::Index,
+        decoder: text::Decoder,
+    ) -> Result<()> {
         if let Some(last_child_ref) = arena.try_get(self)?.last_child {
             if let KindData::Text(text_node) = arena.try_get_mut(last_child_ref)?.kind_data_mut() {
                 if let Some(s) = text_node.index() {
                     if s.stop() == index.start()
+                        && text_node.value.decoder() == decoder
                         && !text_node.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
                         && !text_node.has_qualifiers(TextQualifier::TEMP)
                     {
-                        text_node.value = (s.start(), index.stop()).into();
+                        text_node.value =
+                            text::Value::Index(text::Index::new(s.start(), index.stop()), decoder);
                         return Ok(());
                     }
                 }
             }
         }
-        let new_node_ref = arena.new_node(Text::new(index));
+        let new_node_ref = arena.new_node(Text::new(text::Value::Index(index, decoder)));
         self.try_append_child(arena, new_node_ref)?;
         Ok(())
     }
@@ -499,36 +512,40 @@ impl NodeRef {
     // # Panics
     /// Panics if the operation fails(e.g. due to invalid NodeRef).
     #[inline(always)]
-    pub fn merge_or_insert_after_text(
+    pub(crate) fn merge_or_insert_after_text(
         self,
         arena: &mut Arena,
         target_ref: NodeRef,
         index: text::Index,
+        decoder: text::Decoder,
     ) {
-        self.try_merge_or_insert_after_text(arena, target_ref, index)
+        self.try_merge_or_insert_after_text(arena, target_ref, index, decoder)
             .unwrap();
     }
 
     /// Merges a given index into the text node after the target node if
     /// it can be merged, otherwise creates a new Text node and inserts it after the target node.
-    pub fn try_merge_or_insert_after_text(
+    pub(crate) fn try_merge_or_insert_after_text(
         self,
         arena: &mut Arena,
         target_ref: NodeRef,
         index: text::Index,
+        decoder: text::Decoder,
     ) -> Result<()> {
         if let KindData::Text(text_node) = arena.try_get_mut(target_ref)?.kind_data_mut() {
             if let Some(s) = text_node.index() {
                 if s.stop() == index.start()
+                    && text_node.value.decoder() == decoder
                     && !text_node.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
                     && !text_node.has_qualifiers(TextQualifier::TEMP)
                 {
-                    text_node.value = (s.start(), index.stop()).into();
+                    text_node.value =
+                        text::Value::Index(text::Index::new(s.start(), index.stop()), decoder);
                     return Ok(());
                 }
             }
         }
-        let new_node_ref = arena.new_node(Text::new(index));
+        let new_node_ref = arena.new_node(Text::new(text::Value::Index(index, decoder)));
         self.try_insert_after(arena, target_ref, new_node_ref)?;
         Ok(())
     }
@@ -539,33 +556,39 @@ impl NodeRef {
     /// # Panics
     /// Panics if the operation fails(e.g. due to invalid NodeRef).
     #[inline(always)]
-    pub fn merge_or_insert_before_text(
+    pub(crate) fn merge_or_insert_before_text(
         self,
         arena: &mut Arena,
         target_ref: NodeRef,
         index: text::Index,
+        decoder: text::Decoder,
     ) {
-        self.try_merge_or_insert_before_text(arena, target_ref, index)
+        self.try_merge_or_insert_before_text(arena, target_ref, index, decoder)
             .unwrap();
     }
 
     /// Merges a given index into the text node before the target node if
     /// it can be merged, otherwise creates a new Text node and inserts it before the target node.
-    pub fn try_merge_or_insert_before_text(
+    pub(crate) fn try_merge_or_insert_before_text(
         self,
         arena: &mut Arena,
         target_ref: NodeRef,
         index: text::Index,
+        decoder: text::Decoder,
     ) -> Result<()> {
         if let KindData::Text(text_node) = arena.try_get_mut(target_ref)?.kind_data_mut() {
             if let Some(s) = text_node.index() {
-                if s.start() == index.stop() && !text_node.has_qualifiers(TextQualifier::TEMP) {
-                    text_node.value = (index.start(), s.stop()).into();
+                if s.start() == index.stop()
+                    && text_node.value.decoder() == decoder
+                    && !text_node.has_qualifiers(TextQualifier::TEMP)
+                {
+                    text_node.value =
+                        text::Value::Index(text::Index::new(index.start(), s.stop()), decoder);
                     return Ok(());
                 }
             }
         }
-        let new_node_ref = arena.new_node(Text::new(index));
+        let new_node_ref = arena.new_node(Text::new(text::Value::Index(index, decoder)));
         self.try_insert_before(arena, target_ref, new_node_ref)?;
         Ok(())
     }
@@ -1458,9 +1481,9 @@ where
 /// let mut arena = Arena::default();
 /// let doc_ref = arena.new_node(Document::new());
 /// let paragraph_ref1 = arena.new_node(Paragraph::default());
-/// let text1 = arena.new_node(Text::new("Hello, World!"));
+/// let text1 = arena.new_node(Text::new(rushdown::text::Value::from_string("Hello, World!", rushdown::text::Decoder::Identity)));
 /// let paragraph_ref2 = arena.new_node(Paragraph::default());
-/// let text2 = arena.new_node(Text::new("This is a test."));
+/// let text2 = arena.new_node(Text::new(rushdown::text::Value::from_string("This is a test.", rushdown::text::Decoder::Identity)));
 ///
 /// doc_ref.append_child(&mut arena, paragraph_ref1);
 /// paragraph_ref1.append_child(&mut arena, text1);
@@ -1475,10 +1498,10 @@ where
 ///     if entering {
 ///         if let Some(fc) = arena[node_ref].first_child() {
 ///             if let KindData::Text(t) = &arena[fc].kind_data() {
-///                 if t.str("").contains("test") {
+///                 if t.value().str("").contains("test") {
 ///                     target = Some(node_ref);
 ///                 }
-///                 if t.str("").contains("error") {
+///                 if t.value().str("").contains("error") {
 ///                     return Err(UserError::SomeError("Some error occurred"));
 ///                 }
 ///             }
@@ -1746,14 +1769,14 @@ pub(crate) struct FenceData {
 #[derive(Debug)]
 pub struct CodeBlock {
     code_block_kind: CodeBlockKind,
-    info: Option<text::Value>,
+    info: text::Value,
     fdata: Option<FenceData>,
     value: text::Lines,
 }
 
 impl CodeBlock {
     /// Creates a new [`CodeBlock`] node.
-    pub fn new(code_block_kind: CodeBlockKind, info: Option<text::Value>) -> Self {
+    pub fn new(code_block_kind: CodeBlockKind, info: text::Value) -> Self {
         Self {
             code_block_kind,
             info,
@@ -1788,28 +1811,24 @@ impl CodeBlock {
         self.fdata = Some(fdata);
     }
 
-    /// Returns the info string of the fenced code block.
-    #[inline(always)]
-    pub fn info_str<'a>(&'a self, source: &'a str) -> Option<Cow<'a, str>> {
-        self.info.as_ref().map(|info| info.str(source))
-    }
-
     /// Returns the info value of the fenced code block.
     #[inline(always)]
-    pub fn info(&self) -> Option<&text::Value> {
-        self.info.as_ref()
+    pub fn info(&self) -> &text::Value {
+        &self.info
     }
 
     /// Returns the language of the fenced code block, if specified.
-    pub fn language_str<'a>(&'a self, source: &'a str) -> Option<Cow<'a, str>> {
-        let info = self.info.as_ref()?;
-        let info_str = info.str(source);
-        match info_str.find(' ') {
-            None => Some(info_str),
-            Some(i) => Some(match info_str {
-                Cow::Borrowed(s) => Cow::Borrowed(&s[..i]),
-                Cow::Owned(s) => Cow::Owned(String::from(&s[..i])),
-            }),
+    pub fn language(&self, source: &str) -> text::Value {
+        if self.info.is_empty() {
+            return text::Value::Empty;
+        }
+        let s = self.info.str(source);
+        match (s.find(' '), &self.info) {
+            (None, _) => self.info.clone(),
+            (Some(i), text::Value::Index(idx, d)) => {
+                text::Value::Index(idx.with_stop(idx.start() + i), *d)
+            }
+            (Some(i), v) => text::Value::String(String::from(&s[..i]), v.decoder()),
         }
     }
 }
@@ -1839,8 +1858,8 @@ impl PrettyPrint for CodeBlock {
             w,
             "{}Info: {}",
             pp_indent(level),
-            match self.info_str(source) {
-                Some(info) => info,
+            match self.info.as_option() {
+                Some(info) => info.str(source),
                 None => Cow::Borrowed("<none>"),
             }
         )?;
@@ -2193,19 +2212,16 @@ impl From<HtmlBlock> for KindData {
 pub struct LinkReferenceDefinition {
     label: text::Value,
     destination: text::Value,
-    title: Option<text::Value>,
+    title: text::Value,
 }
 
 impl LinkReferenceDefinition {
     /// Creates a new [`LinkReferenceDefinition`] node.
-    pub fn new(
-        label: impl Into<text::Value>,
-        destination: impl Into<text::Value>,
-    ) -> Self {
+    pub fn new(label: impl Into<text::Value>, destination: impl Into<text::Value>) -> Self {
         Self {
             label: label.into(),
             destination: destination.into(),
-            title: None,
+            title: text::Value::Empty,
         }
     }
 
@@ -2218,7 +2234,7 @@ impl LinkReferenceDefinition {
         Self {
             label: label.into(),
             destination: destination.into(),
-            title: Some(title.into()),
+            title: title.into(),
         }
     }
 
@@ -2228,34 +2244,16 @@ impl LinkReferenceDefinition {
         &self.label
     }
 
-    /// Returns the string representation of the label of the link reference definition.
-    #[inline(always)]
-    pub fn label_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        self.label.str(source)
-    }
-
     /// Returns the destination of the link reference definition.
     #[inline(always)]
     pub fn destination(&self) -> &text::Value {
         &self.destination
     }
 
-    /// Returns the string representation of the destination of the link reference definition.
-    #[inline(always)]
-    pub fn destination_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        self.destination.str(source)
-    }
-
     /// Returns the title of the link reference definition.
     #[inline(always)]
-    pub fn title(&self) -> Option<&text::Value> {
-        self.title.as_ref()
-    }
-
-    /// Returns the string representation of the title of the link reference definition.
-    #[inline(always)]
-    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<Cow<'a, str>> {
-        self.title.as_ref().map(|t| t.str(source))
+    pub fn title(&self) -> &text::Value {
+        &self.title
     }
 }
 
@@ -2282,7 +2280,10 @@ impl PrettyPrint for LinkReferenceDefinition {
             w,
             "{}Title: {}",
             pp_indent(level),
-            self.title_str(source).as_deref().unwrap_or("<None>")
+            self.title
+                .as_option()
+                .map(|t| t.str(source))
+                .unwrap_or(Cow::Borrowed("<None>"))
         )
     }
 }
@@ -2561,7 +2562,7 @@ impl Text {
     #[inline(always)]
     pub fn index(&self) -> Option<&text::Index> {
         match &self.value {
-            text::Value::Index(idx) => Some(idx),
+            text::Value::Index(idx, _) => Some(idx),
             _ => None,
         }
     }
@@ -2582,14 +2583,10 @@ impl Text {
         self.qualifiers.contains(qualifiers)
     }
 
-    /// Returns the bytes of this text.
-    pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
-        self.value.bytes(source)
-    }
-
-    /// Returns the UTF-8 string  of this text.
-    pub fn str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        self.value.str(source)
+    /// Returns the value of this text.
+    #[inline(always)]
+    pub fn value(&self) -> &text::Value {
+        &self.value
     }
 }
 
@@ -2606,7 +2603,12 @@ impl NodeKind for Text {
 impl PrettyPrint for Text {
     fn pretty_print(&self, w: &mut dyn Write, source: &str, level: usize) -> fmt::Result {
         writeln!(w, "{}Qualifiers: {:?}", pp_indent(level), self.qualifiers)?;
-        writeln!(w, "{}Content: '{}'", pp_indent(level), self.str(source))
+        writeln!(
+            w,
+            "{}Content: '{}'",
+            pp_indent(level),
+            self.value.str(source)
+        )
     }
 }
 
@@ -2620,82 +2622,46 @@ impl From<Text> for KindData {
 
 //   CodeSpan {{{
 
-#[derive(Debug)]
-enum CodeSpanValue {
-    Indices(TinyVec<text::Index>),
-    String(String),
-}
-
 /// Represents an inline code span in the document.
 #[derive(Debug)]
 pub struct CodeSpan {
-    value: CodeSpanValue,
+    value: text::Value,
 }
 
 impl CodeSpan {
     /// Creates a new empty [`CodeSpan`] node.
     pub fn empty() -> Self {
         Self {
-            value: CodeSpanValue::Indices(TinyVec::empty()),
+            value: text::Value::Empty,
         }
     }
 
     /// Creates a new [`CodeSpan`] node from the given indices.
     pub fn from_indices(indices: impl Into<TinyVec<text::Index>>) -> Self {
         Self {
-            value: CodeSpanValue::Indices(indices.into()),
+            value: text::CodeSpanValue::from_indices(indices).into(),
         }
     }
 
     /// Creates a new [`CodeSpan`] node from the given string.
     pub fn from_string(value: impl Into<String>) -> Self {
         Self {
-            value: CodeSpanValue::String(value.into()),
+            value: text::CodeSpanValue::from_string(value).into(),
         }
     }
 
     pub(crate) fn indices(&self) -> Option<&[text::Index]> {
         match &self.value {
-            CodeSpanValue::Indices(indices) => Some(indices.as_slice()),
+            text::Value::CodeSpan(c) => c.indices(),
             _ => None,
         }
     }
 
-    /// Returns the string representation of the code span value of this code span.
-    /// If the value contains a newline character, it will be replaced with a space character.
-    pub fn str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        match &self.value {
-            CodeSpanValue::Indices(indices) => {
-                if indices.is_empty() {
-                    Cow::Borrowed("")
-                } else if indices.len() == 1 {
-                    let idx = indices[0];
-                    if source.as_bytes()[idx.stop() - 1] != b'\n' {
-                        Cow::Borrowed(idx.str(source))
-                    } else {
-                        let idx: text::Index = (idx.start(), idx.stop() - 1).into();
-                        let s = idx.str(source);
-                        let mut st = String::with_capacity(s.len() + 1);
-                        st.push_str(s);
-                        st.push(' ');
-                        Cow::Owned(st)
-                    }
-                } else {
-                    let mut s = String::new();
-                    for idx in indices.iter() {
-                        s.push_str(idx.str(source));
-                    }
-                    Cow::Owned(s.replace('\n', " "))
-                }
-            }
-            CodeSpanValue::String(s) => {
-                if memchr::memchr(b'\n', s.as_bytes()).is_some() {
-                    Cow::Owned(s.replace('\n', " "))
-                } else {
-                    Cow::Borrowed(s)
-                }
-            }
-        }
+    /// Returns the value of this code span.
+    /// [`text::Value::value`] returns a normalized value: newline characters are replaced
+    /// with space characters.
+    pub fn value(&self) -> &text::Value {
+        &self.value
     }
 }
 
@@ -2825,12 +2791,6 @@ pub struct LinkReference {
 }
 
 impl LinkReference {
-    /// Returns the string representation of the reference value of this link reference.
-    #[inline(always)]
-    pub fn value_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        self.value.str(source)
-    }
-
     /// Returns the reference value of this link reference.
     #[inline(always)]
     pub fn value(&self) -> &text::Value {
@@ -2851,12 +2811,6 @@ pub struct AutoLink {
 }
 
 impl AutoLink {
-    /// Returns the string representation of the auto link text of this auto link.
-    #[inline(always)]
-    pub fn text_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        self.text.str(source)
-    }
-
     /// Returns the auto link text of this auto link.
     #[inline(always)]
     pub fn text(&self) -> &text::Value {
@@ -2869,7 +2823,7 @@ impl AutoLink {
 pub struct Link {
     destination: text::Value,
 
-    title: Option<text::Value>,
+    title: text::Value,
 
     link_kind: LinkKind,
 }
@@ -2879,7 +2833,7 @@ impl Link {
     pub fn inline(destination: impl Into<text::Value>) -> Self {
         Self {
             destination: destination.into(),
-            title: None,
+            title: text::Value::Empty,
             link_kind: LinkKind::Inline,
         }
     }
@@ -2891,7 +2845,7 @@ impl Link {
     ) -> Self {
         Self {
             destination: destination.into(),
-            title: Some(title.into()),
+            title: title.into(),
             link_kind: LinkKind::Inline,
         }
     }
@@ -2904,7 +2858,7 @@ impl Link {
     ) -> Self {
         Self {
             destination: destination.into(),
-            title: None,
+            title: text::Value::Empty,
             link_kind: LinkKind::Reference(LinkReference {
                 value: value.into(),
                 link_reference_kind: reference_kind,
@@ -2921,7 +2875,7 @@ impl Link {
     ) -> Self {
         Self {
             destination: destination.into(),
-            title: Some(title.into()),
+            title: title.into(),
             link_kind: LinkKind::Reference(LinkReference {
                 value: value.into(),
                 link_reference_kind: reference_kind,
@@ -2933,7 +2887,7 @@ impl Link {
     pub fn auto(destination: impl Into<text::Value>, text: impl Into<text::Value>) -> Self {
         Self {
             destination: destination.into(),
-            title: None,
+            title: text::Value::Empty,
             link_kind: LinkKind::Auto(AutoLink { text: text.into() }),
         }
     }
@@ -2944,22 +2898,10 @@ impl Link {
         &self.destination
     }
 
-    /// Returns the string representation of the destination of the link.
+    /// Returns the title of the link.
     #[inline(always)]
-    pub fn destination_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        self.destination.str(source)
-    }
-
-    /// Returns the title of the link, if it exists.
-    #[inline(always)]
-    pub fn title(&self) -> Option<&text::Value> {
-        self.title.as_ref()
-    }
-
-    /// Returns the string representation of the title of the link, if it exists.
-    #[inline(always)]
-    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<Cow<'a, str>> {
-        self.title.as_ref().map(|t| t.str(source))
+    pub fn title(&self) -> &text::Value {
+        &self.title
     }
 
     /// Returns the kind of this link.
@@ -3014,7 +2956,7 @@ impl PrettyPrint for Link {
             pp_indent(level),
             self.destination.str(source)
         )?;
-        if let Some(title) = &self.title {
+        if let Some(title) = self.title.as_option() {
             writeln!(w, "{}Title: {}", pp_indent(level), title.str(source))?;
         }
         Ok(())
@@ -3036,7 +2978,7 @@ impl From<Link> for KindData {
 pub struct Image {
     destination: text::Value,
 
-    title: Option<text::Value>,
+    title: text::Value,
 
     link_kind: LinkKind,
 }
@@ -3054,7 +2996,7 @@ impl Image {
     pub fn inline(destination: impl Into<text::Value>) -> Self {
         Self {
             destination: destination.into(),
-            title: None,
+            title: text::Value::Empty,
             link_kind: LinkKind::Inline,
         }
     }
@@ -3066,7 +3008,7 @@ impl Image {
     ) -> Self {
         Self {
             destination: destination.into(),
-            title: Some(title.into()),
+            title: title.into(),
             link_kind: LinkKind::Inline,
         }
     }
@@ -3079,7 +3021,7 @@ impl Image {
     ) -> Self {
         Self {
             destination: destination.into(),
-            title: None,
+            title: text::Value::Empty,
             link_kind: LinkKind::Reference(LinkReference {
                 value: value.into(),
                 link_reference_kind: reference_kind,
@@ -3096,7 +3038,7 @@ impl Image {
     ) -> Self {
         Self {
             destination: destination.into(),
-            title: Some(title.into()),
+            title: title.into(),
             link_kind: LinkKind::Reference(LinkReference {
                 value: value.into(),
                 link_reference_kind: reference_kind,
@@ -3110,22 +3052,10 @@ impl Image {
         &self.destination
     }
 
-    /// Returns the string representation of the destination of the link.
+    /// Returns the title of the link.
     #[inline(always)]
-    pub fn destination_str<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        self.destination.str(source)
-    }
-
-    /// Returns the title of the link, if it exists.
-    #[inline(always)]
-    pub fn title(&self) -> Option<&text::Value> {
-        self.title.as_ref()
-    }
-
-    /// Returns the string representation of the title of the link, if it exists.
-    #[inline(always)]
-    pub fn title_str<'a>(&'a self, source: &'a str) -> Option<Cow<'a, str>> {
-        self.title.as_ref().map(|t| t.str(source))
+    pub fn title(&self) -> &text::Value {
+        &self.title
     }
 
     /// Returns the link kind of this image.
@@ -3153,7 +3083,7 @@ impl PrettyPrint for Image {
             pp_indent(level),
             self.destination.str(source)
         )?;
-        if let Some(title) = &self.title {
+        if let Some(title) = self.title.as_option() {
             writeln!(w, "{}Title: {}", pp_indent(level), title.str(source))?;
         }
         Ok(())

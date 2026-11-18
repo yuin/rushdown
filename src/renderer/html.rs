@@ -364,9 +364,10 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         if entering {
             self.writer.write_safe_str(w, "<pre><code")?;
             let kd = as_kind_data!(arena, node_ref, CodeBlock);
-            if let Some(lang) = kd.language_str(source) {
+            let lang = kd.language(source);
+            if let Some(lang) = lang.as_option() {
                 self.writer.write_safe_str(w, " class=\"language-")?;
-                self.writer.write(w, &lang)?;
+                self.writer.raw_write(w, &lang.value(source))?;
                 self.writer.write_safe_str(w, "\"")?;
             }
             self.writer.write_safe_str(w, ">")?;
@@ -634,7 +635,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         if entering {
             let kd = as_kind_data!(arena, node_ref, Text);
-            self.writer.write(w, &kd.str(source))?;
+            self.writer.raw_write(w, &kd.value().value(source))?;
             if kd.has_qualifiers(TextQualifier::HARD_LINE_BREAK)
                 || (kd.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
                     && self.format_options.hard_wraps)
@@ -665,7 +666,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
             self.writer.write_safe_str(w, "<code")?;
             write_attributes!(arena, node_ref, source, w, self.format_options, code_span);
             self.writer.write_safe_str(w, ">")?;
-            self.writer.raw_write(w, &kd.str(source))?;
+            self.writer.raw_write(w, &kd.value().value(source))?;
             return Ok(WalkStatus::SkipChildren);
         } else {
             self.writer.write_safe_str(w, "</code>")?;
@@ -719,11 +720,8 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         let kd = as_kind_data!(arena, node_ref, Link);
         if entering {
             let mut dest = escape_url(
-                kd.destination().bytes(source),
-                &EscapeUrlOptions {
-                    resolves_refs: !matches!(kd.link_kind(), LinkKind::Auto(_)),
-                    ..EscapeUrlOptions::for_url()
-                },
+                kd.destination().value_bytes(source),
+                &EscapeUrlOptions::for_url(),
             );
             self.writer.write_safe_str(w, "<a href=\"")?;
             if self.format_options.allows_unsafe || !is_dangerous_url(&dest) {
@@ -731,9 +729,9 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
                 self.writer.write_safe_str(w, SafeBytes(&dest))?;
             }
             self.writer.write_safe_str(w, "\"")?;
-            if let Some(title) = kd.title() {
+            if let Some(title) = kd.title().as_option() {
                 self.writer.write_safe_str(w, " title=\"")?;
-                self.writer.write(w, &title.str(source))?;
+                self.writer.raw_write(w, &title.value(source))?;
                 self.writer.write_safe_str(w, "\"")?;
             }
             write_attributes!(arena, node_ref, source, w, self.format_options, link);
@@ -742,7 +740,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
                 if let Some(fc) = arena[node_ref].first_child() {
                     if matches_kind!(arena, fc, Text) {
                         let t = as_kind_data!(arena, fc, Text);
-                        self.writer.raw_write(w, &t.str(source))?;
+                        self.writer.raw_write(w, &t.value().value(source))?;
                         self.writer.write_safe_str(w, "</a>")?;
                     }
                 }
@@ -768,11 +766,8 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         if entering {
             let kd = as_kind_data!(arena, node_ref, Image);
             let mut dest = escape_url(
-                kd.destination().bytes(source),
-                &EscapeUrlOptions {
-                    resolves_refs: true,
-                    ..EscapeUrlOptions::for_url()
-                },
+                kd.destination().value_bytes(source),
+                &EscapeUrlOptions::for_url(),
             );
             self.writer.write_safe_str(w, "<img src=\"")?;
             if self.format_options.allows_unsafe || !is_dangerous_url(&dest) {
@@ -782,9 +777,9 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
             self.writer.write_safe_str(w, "\" alt=\"")?;
             self.render_texts(w, source, arena, node_ref, ctx)?;
             self.writer.write_safe_str(w, "\"")?;
-            if let Some(title) = kd.title() {
+            if let Some(title) = kd.title().as_option() {
                 self.writer.write_safe_str(w, " title=\"")?;
-                self.writer.write(w, &title.str(source))?;
+                self.writer.raw_write(w, &title.value(source))?;
                 self.writer.write_safe_str(w, "\"")?;
             }
             write_attributes!(arena, node_ref, source, w, self.format_options, image);
@@ -1181,8 +1176,8 @@ pub fn render_attributes<W: TextWrite>(
         w.write_str(" ")?;
         w.write_str(key)?;
         w.write_str("=\"")?;
-        let b = value.bytes(source);
-        write_bytes(w, &escape_html(b))?;
+        let resolved = value.value(source);
+        write_bytes(w, &escape_html(resolved.as_bytes()))?;
         w.write_str("\"")?;
     }
     Ok(())

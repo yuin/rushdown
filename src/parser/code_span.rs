@@ -37,9 +37,9 @@ impl InlineParser for CodeSpanParser {
         'try_lines: loop {
             let Some(line_segment_opt) = reader.peek_line_bytes() else {
                 reader.set_position(l, pos);
-                return Some(arena.new_node(Text::new(Segment::new(
-                    start_segment.start(),
-                    start_segment.start() + opener,
+                return Some(arena.new_node(Text::new(text::Value::from_segment(
+                    Segment::new(start_segment.start(), start_segment.start() + opener),
+                    reader.decoder(),
                 ))));
             };
             let (line, mut segment) = line_segment_opt;

@@ -121,7 +121,7 @@ impl InlineParser for LinkParser {
                 return None;
             };
             let ref_def = as_kind_data!(arena, link_ref, LinkReferenceDefinition);
-            link_opt = Some(match ref_def.title() {
+            link_opt = Some(match ref_def.title().as_option() {
                 Some(t) => Link::reference_with_title(
                     ref_def.destination(),
                     maybe_link_ref_value,
@@ -225,7 +225,7 @@ fn parse_reference_link(
         ctx.link_reference(unsafe { core::str::from_utf8_unchecked(&maybe_link_ref) })?;
     let ref_def = as_kind_data!(arena, link_ref, LinkReferenceDefinition);
 
-    Some(match ref_def.title() {
+    Some(match ref_def.title().as_option() {
         Some(t) => {
             Link::reference_with_title(ref_def.destination(), link_ref_value, kind, t.clone())
         }
@@ -279,7 +279,7 @@ fn parse_link(reader: &mut text::BlockReader) -> Option<Link> {
             }
         }
     }
-    let destination = destination.unwrap_or_else(|| "".into());
+    let destination = destination.unwrap_or(text::Value::Empty);
     Some(match title {
         Some(t) => Link::inline_with_title(destination, t),
         None => Link::inline(destination),
@@ -345,7 +345,10 @@ pub(super) fn parse_link_destination(reader: &mut text::BlockReader) -> Option<t
                 continue;
             } else if c == b'>' {
                 reader.advance(i + 1);
-                return Some(Segment::new(segment.start() + 1, segment.start() + i).into());
+                return Some(text::Value::from_segment(
+                    Segment::new(segment.start() + 1, segment.start() + i),
+                    reader.decoder(),
+                ));
             }
             i += 1;
         }
@@ -375,7 +378,10 @@ pub(super) fn parse_link_destination(reader: &mut text::BlockReader) -> Option<t
         return None;
     }
     reader.advance(i);
-    Some(Segment::new(segment.start(), segment.start() + i).into())
+    Some(text::Value::from_segment(
+        Segment::new(segment.start(), segment.start() + i),
+        reader.decoder(),
+    ))
 }
 
 fn contains_link(arena: &Arena, node_ref: Option<NodeRef>) -> bool {
@@ -403,7 +409,10 @@ fn process_link_label_open(
     let start = if is_image { pos - 1 } else { pos };
     let state = LinkLabel::new(is_image);
     let seg: Segment = (start, pos + 1).into();
-    let node_ref = arena.new_node(Text::with_qualifiers(seg, TextQualifier::TEMP));
+    let node_ref = arena.new_node(Text::with_qualifiers(
+        text::Value::from_segment(seg, reader.decoder()),
+        TextQualifier::TEMP,
+    ));
     ctx.link_labels_mut().push(state, node_ref);
     reader.advance(1);
     Some(node_ref)

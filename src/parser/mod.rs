@@ -1032,14 +1032,16 @@ impl Parser {
 
     /// Parses the input from the given reader and returns the resulting AST arena and root
     /// document node.
-    pub fn parse(&self, reader: &mut text::BasicReader) -> (Arena, NodeRef) {
+    pub fn parse(&self, source: &str) -> (Arena, NodeRef) {
+        let mut reader =
+            text::BasicReader::with_decoder(source, text::Decoder::new(self.options.escaped_space));
         let mut arena = Arena::with_options(self.options.arena);
         let context = &mut Context::new();
         let reg = self.context_key_registry.borrow();
         context.initialize(&reg);
 
         let doc = arena.new_node(ast::Document::new());
-        self.parse_blocks(&mut arena, doc, reader, context);
+        self.parse_blocks(&mut arena, doc, &mut reader, context);
 
         let mut blocks = vec![];
         ast::walk(&arena, doc, &mut |_: &Arena,
@@ -1059,11 +1061,11 @@ impl Parser {
         .expect("walk failed");
 
         for &block in &blocks {
-            self.parse_block(&mut arena, block, reader, context);
+            self.parse_block(&mut arena, block, &mut reader, context);
         }
 
         for transformer in &self.ast_transformers {
-            transformer.transform(&mut arena, doc, reader, context);
+            transformer.transform(&mut arena, doc, &mut reader, context);
         }
 
         #[cfg(feature = "pp-ast")]
@@ -1311,7 +1313,8 @@ impl Parser {
 
         let lines = bd.take_source();
         let mut escaped = false;
-        let mut block_reader = text::BlockReader::new(reader.source(), &lines);
+        let mut block_reader =
+            text::BlockReader::with_decoder(reader.source(), &lines, reader.decoder());
 
         'try_lines: while let Some((line, _)) = block_reader.peek_line_bytes() {
             let mut line_len = line.len();
@@ -1380,7 +1383,11 @@ impl Parser {
                             let (_, current_position) = block_reader.position();
                             if start_position.stop() == current_position.stop() {
                                 let bw = start_position.between(current_position);
-                                block_ref.merge_or_append_text(arena, bw.into());
+                                block_ref.merge_or_append_text(
+                                    arena,
+                                    bw.into(),
+                                    block_reader.decoder(),
+                                );
                             }
                             let (_, sp) = block_reader.position();
                             start_position = sp;
@@ -1430,9 +1437,12 @@ impl Parser {
             let diff = start_position.between(current_position);
             let mut text_node =
                 if flags.contains(LineBreakFlags::HARD_LINE_BREAK | LineBreakFlags::VISIBLE) {
-                    Text::new(diff)
+                    Text::new(text::Value::from_segment(diff, block_reader.decoder()))
                 } else {
-                    Text::new(diff.trim_right_space(reader.source()))
+                    Text::new(text::Value::from_segment(
+                        diff.trim_right_space(reader.source()),
+                        block_reader.decoder(),
+                    ))
                 };
             if flags.contains(LineBreakFlags::SOFT_LINE_BREAK) {
                 text_node.add_qualifiers(TextQualifier::SOFT_LINE_BREAK);
@@ -2513,19 +2523,28 @@ impl<S: ParseStackElemSpec> ParseStack<S> {
         if let Some(elem) = self.elements.get_mut(r.0).and_then(|e| e.take()) {
             if elem.node_ref() != NODE_REF_UNDEFINED {
                 if let Some(remaining) = elem.remaining(arena) {
+                    let decoder = as_kind_data!(arena, elem.node_ref(), Text)
+                        .value()
+                        .decoder();
                     if let Some(parent_node) = arena[elem.node_ref()].parent() {
                         let previous_node = arena[elem.node_ref()].previous_sibling();
                         if let Some(prev_node_ref) = previous_node {
                             let parent_node = arena[prev_node_ref].parent().unwrap();
-                            parent_node.merge_or_insert_after_text(arena, prev_node_ref, remaining)
+                            parent_node.merge_or_insert_after_text(
+                                arena,
+                                prev_node_ref,
+                                remaining,
+                                decoder,
+                            )
                         } else if let Some(first_child_ref) = arena[parent_node].first_child() {
                             parent_node.merge_or_insert_before_text(
                                 arena,
                                 first_child_ref,
                                 remaining,
+                                decoder,
                             )
                         } else {
-                            parent_node.merge_or_append_text(arena, remaining);
+                            parent_node.merge_or_append_text(arena, remaining, decoder);
                         }
                     }
                 }

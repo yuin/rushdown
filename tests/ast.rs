@@ -1,12 +1,11 @@
-use rushdown::{node_path, parser, text};
+use rushdown::{node_path, parser};
 
 fn test_inline_pos_aux(source: &str, node_type: &str) {
     let p = parser::Parser::with_extensions(
         parser::Options::default(),
         parser::gfm(parser::GfmOptions::default()),
     );
-    let mut reader = text::BasicReader::new(source);
-    let (arena, document_ref) = p.parse(&mut reader);
+    let (arena, document_ref) = p.parse(source);
     let n = node_path!(arena, document_ref, first_child, first_child).unwrap();
     assert_eq!(
         arena[n].pos(),
@@ -111,8 +110,7 @@ fn test_block_pos_aux(source: &str, node_type: &str, expected: usize, n: usize) 
         parser::Options::default(),
         parser::gfm(parser::GfmOptions::default()),
     );
-    let mut reader = text::BasicReader::new(source);
-    let (arena, document_ref) = p.parse(&mut reader);
+    let (arena, document_ref) = p.parse(source);
 
     let mut fc = arena[document_ref].first_child().unwrap();
     for _ in 0..n {
@@ -247,8 +245,7 @@ aaaa
         parser::Options::default(),
         parser::gfm(parser::GfmOptions::default()),
     );
-    let mut reader = text::BasicReader::new(source);
-    let (mut arena, document_ref) = p.parse(&mut reader);
+    let (mut arena, document_ref) = p.parse(source);
 
     {
         let n = node_path!(&mut arena, document_ref, first_child).unwrap();

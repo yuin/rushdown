@@ -55,7 +55,10 @@ pub fn parse_delimiter<'a>(
         reader.advance(j);
         let delim = Delimiter::new(c, j, can_open, can_close, processor.clone());
         let seg: Segment = (segment.start(), segment.start() + j).into();
-        let t = arena.new_node(Text::with_qualifiers(seg, TextQualifier::TEMP));
+        let t = arena.new_node(Text::with_qualifiers(
+            text::Value::from_segment(seg, reader.decoder()),
+            TextQualifier::TEMP,
+        ));
 
         ctx.delimiters_mut().push(delim, t);
         return Some(t);

@@ -24,7 +24,6 @@ pub use error::{Error, Result};
 use crate::{
     parser::{Parser, ParserExtension},
     renderer::{html, TextWrite},
-    text::BasicReader,
 };
 
 /// Trait for converting Markdown to HTML.
@@ -92,8 +91,7 @@ where
     let parser = Parser::with_extensions(parser_options, parser_extension);
     let renderer = html::Renderer::<'r, W>::with_extensions(renderer_options, renderer_extension);
     move |output: &mut W, source: &str| {
-        let mut reader = BasicReader::new(source);
-        let (arena, document_ref) = parser.parse(&mut reader);
+        let (arena, document_ref) = parser.parse(source);
         renderer.render(output, source, &arena, document_ref)
     }
 }
@@ -133,8 +131,7 @@ pub fn new_markdown_to_html_string<'r>(
 pub fn markdown_to_html_string(output: &mut String, source: &str) -> Result<()> {
     let parser = Parser::with_options(parser::Options::default());
     let renderer = html::Renderer::with_options(html::Options::default());
-    let mut reader = BasicReader::new(source);
-    let (arena, document_ref) = parser.parse(&mut reader);
+    let (arena, document_ref) = parser.parse(source);
     renderer.render(output, source, &arena, document_ref)
 }
 
@@ -457,12 +454,15 @@ macro_rules! as_type_data_mut {
 /// let doc = md_ast!(&mut arena, Document::new() => {
 ///     Blockquote::new() => {
 ///         Paragraph::new(); { |node: &mut Node| {
-///             node.attributes_mut().insert("class", "paragraph".into());
+///             node.attributes_mut().insert(
+///     "class",
+///     rushdown::text::Value::from_string("paragraph", rushdown::text::Decoder::Identity),
+/// );
 ///         } } => {
-///             Text::new("Hello, World!")
+///             Text::new(rushdown::text::Value::from_string("Hello, World!", rushdown::text::Decoder::Identity))
 ///         },
 ///         Paragraph::new() => {
-///             Text::new("This is a test.")
+///             Text::new(rushdown::text::Value::from_string("This is a test.", rushdown::text::Decoder::Identity))
 ///         }
 ///     }
 /// });
@@ -527,17 +527,20 @@ macro_rules! md_ast {
 /// let doc = md_ast!(&mut arena, Document::new() => {
 ///     Blockquote::new() => {
 ///         Paragraph::new(); { |node: &mut Node| {
-///             node.attributes_mut().insert("class", "paragraph".into());
+///             node.attributes_mut().insert(
+///     "class",
+///     rushdown::text::Value::from_string("paragraph", rushdown::text::Decoder::Identity),
+/// );
 ///         } } => {
-///             Text::new("Hello, World!")
+///             Text::new(rushdown::text::Value::from_string("Hello, World!", rushdown::text::Decoder::Identity))
 ///         },
 ///         Paragraph::new() => {
-///             Text::new("This is a test.")
+///             Text::new(rushdown::text::Value::from_string("This is a test.", rushdown::text::Decoder::Identity))
 ///         }
 ///     }
 /// });
 /// let text_opt = node_path!(arena, doc, first_child, first_child, first_child);
-/// assert_eq!(as_kind_data!(arena, text_opt.unwrap(), Text).str(""), "Hello, World!");
+/// assert_eq!(as_kind_data!(arena, text_opt.unwrap(), Text).value().str(""), "Hello, World!");
 /// ```
 #[macro_export]
 macro_rules! node_path {

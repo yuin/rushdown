@@ -295,9 +295,10 @@ fn generate_auto_heading_id(
         ctx.ids_mut()
             .generate(&content, arena[node_ref].kind_data())
     };
-    arena[node_ref]
-        .attributes_mut()
-        .insert("id".to_string(), heading_id.into());
+    arena[node_ref].attributes_mut().insert(
+        "id".to_string(),
+        text::Value::from_string(heading_id, text::Decoder::Identity),
+    );
 }
 
 fn parse_heading_attributes(
@@ -317,7 +318,7 @@ fn parse_heading_attributes(
         lines.last()
     }?;
     let blk = &[seg];
-    let mut lreader = BlockReader::new(reader.source(), blk);
+    let mut lreader = BlockReader::with_decoder(reader.source(), blk, reader.decoder());
 
     loop {
         let c = lreader.peek_byte();

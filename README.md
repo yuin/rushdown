@@ -323,13 +323,13 @@ let doc_ref = arena.new_node(Document::new());
 let paragraph_ref = arena.new_node(Paragraph::new());
 let seg = Segment::new(0, source.len());
 as_type_data_mut!(&mut arena[paragraph_ref], Block).append_source_line(seg);
-let text_ref = arena.new_node(Text::new(seg));
+let text_ref = arena.new_node(Text::new(rushdown::text::Value::from_segment(seg, rushdown::text::Decoder::Identity)));
 paragraph_ref.append_child(&mut arena, text_ref);
 doc_ref.append_child(&mut arena, paragraph_ref);
 
 assert_eq!(arena[paragraph_ref].first_child().unwrap(), text_ref);
 assert_eq!(
-    as_kind_data!(&arena[text_ref], Text).str(source),
+    as_kind_data!(&arena[text_ref], Text).value().str(source),
     "Hello, World!"
 );
 assert_eq!(
@@ -369,12 +369,12 @@ let mut arena = Arena::default();
 let doc_ref = md_ast!(&mut arena, Document::new() => {
     Blockquote::new() => {
         Paragraph::new(); { |node: &mut Node| {
-            node.attributes_mut().insert("class", "paragraph".into());
+            node.attributes_mut().insert("class", rushdown::text::Value::from_string("paragraph", rushdown::text::Decoder::Identity));
         } } => {
-            Text::new("Hello, World!")
+            Text::new(rushdown::text::Value::from_string("Hello, World!", rushdown::text::Decoder::Identity))
         },
         Paragraph::new() => {
-            Text::new("This is a test.")
+            Text::new(rushdown::text::Value::from_string("This is a test.", rushdown::text::Decoder::Identity))
         }
     }
 });
@@ -387,10 +387,10 @@ walk(&arena, doc_ref, &mut |arena: &Arena,
     if entering {
         if let Some(fc) = arena[node_ref].first_child() {
             if let KindData::Text(t) = &arena[fc].kind_data() {
-                if t.str("").contains("test") {
+                if t.value().str("").contains("test") {
                     target = Some(node_ref);
                 }
-                if t.str("").contains("error") {
+                if t.value().str("").contains("error") {
                     return Err(UserError::SomeError("Some error occurred"));
                 }
             }
