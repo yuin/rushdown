@@ -238,7 +238,6 @@ heading {#id .className attrName=attrValue}
 | `hard_wrap` | `false` | Renders soft line breaks as hard line breaks (`<br />`). |
 | `xhtml` | `false` | Whether to render HTML in XHTML style. |
 | `allows_unsafe` | `false` | Whether to allow rendering raw HTML and potentially-dangerous URLs. |
-| `escaped_space` | `false` | Indicates that a '\' escaped half-space(0x20) should not be rendered. |
 | `attribute_filters` | default filters | A list of filters for rendering attributes as HTML tag attributes. |
 
 #### Customize Task list item rendering

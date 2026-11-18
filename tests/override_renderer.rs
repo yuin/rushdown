@@ -17,14 +17,12 @@ use rushdown::{
 #[allow(dead_code)]
 struct CustomParagraphRenderer<W: TextWrite> {
     _phantom: core::marker::PhantomData<*const W>,
-    writer: html::Writer,
 }
 
 impl<W: TextWrite> CustomParagraphRenderer<W> {
-    fn with_html_options(options: html::Options) -> Self {
+    fn with_html_options(_options: html::Options) -> Self {
         Self {
             _phantom: core::marker::PhantomData,
-            writer: html::Writer::with_options(options),
         }
     }
 }
@@ -41,9 +39,9 @@ impl<W: TextWrite> RenderNode<W> for CustomParagraphRenderer<W> {
         _context: &mut renderer::Context,
     ) -> Result<WalkStatus, rushdown::Error> {
         if entering {
-            self.writer.write_safe_str(w, "<pp>")?;
+            w.write_str("<pp>")?;
         } else {
-            self.writer.write_safe_str(w, "</pp>")?;
+            w.write_str("</pp>")?;
         }
         Ok(WalkStatus::Continue)
     }

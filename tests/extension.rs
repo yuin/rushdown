@@ -12,7 +12,7 @@ use rushdown::{
     parser::*,
     renderer,
     renderer::{
-        html::{renderer_extension, Options, RendererExtension},
+        html::{renderer_extension, RendererExtension},
         *,
     },
     text,
@@ -126,15 +126,13 @@ impl RendererOptions for UserMentionOptions {}
 
 struct UserMentionHtmlRenderer<W: TextWrite> {
     _phantom: core::marker::PhantomData<W>,
-    writer: html::Writer,
     options: UserMentionOptions,
 }
 
 impl<W: TextWrite> UserMentionHtmlRenderer<W> {
-    fn with_options(html_opts: Options, options: UserMentionOptions) -> Self {
+    fn with_options(options: UserMentionOptions) -> Self {
         Self {
             _phantom: core::marker::PhantomData,
-            writer: html::Writer::with_options(html_opts),
             options,
         }
     }
@@ -151,14 +149,14 @@ impl<W: TextWrite> RenderNode<W> for UserMentionHtmlRenderer<W> {
         _context: &mut renderer::Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<span class=\"")?;
-            self.writer
-                .write_html(w, self.options.class_name.as_str())?;
-            self.writer.write_safe_str(w, "\"><strong>")?;
+            w.write_str("<span class=\"")?;
+            html::write_html(w, self.options.class_name.as_str())?;
+            w.write_str("\"><strong>")?;
             let um = as_extension_data!(arena, node_ref, UserMention);
-            self.writer.write(w, &um.username.str(source))?;
+            um.username
+                .write_to(&mut html::TextWriter::new(w), source)?;
         } else {
-            self.writer.write_safe_str(w, "</strong></span>")?;
+            w.write_str("</strong></span>")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -362,15 +360,13 @@ impl From<AdmonitionAstTransformer> for AnyAstTransformer {
 
 struct AdmonitionHtmlRenderer<W: TextWrite> {
     _phantom: core::marker::PhantomData<W>,
-    writer: html::Writer,
     options: AdmonitionHtmlRendererOptions,
 }
 
 impl<W: TextWrite> AdmonitionHtmlRenderer<W> {
-    fn with_options(html_opts: Options, options: AdmonitionHtmlRendererOptions) -> Self {
+    fn with_options(options: AdmonitionHtmlRendererOptions) -> Self {
         Self {
             _phantom: core::marker::PhantomData,
-            writer: html::Writer::with_options(html_opts),
             options,
         }
     }
@@ -387,12 +383,11 @@ impl<W: TextWrite> RenderNode<W> for AdmonitionHtmlRenderer<W> {
         _context: &mut renderer::Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<div class=\"")?;
-            self.writer
-                .write_html(w, self.options.class_name.as_str())?;
-            self.writer.write_safe_str(w, "\">")?;
+            w.write_str("<div class=\"")?;
+            html::write_html(w, self.options.class_name.as_str())?;
+            w.write_str("\">")?;
         } else {
-            self.writer.write_safe_str(w, "</div>")?;
+            w.write_str("</div>")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -443,15 +438,13 @@ impl Default for HeaderFooterHtmlRendererOptions {
 
 struct HeaderPreRenderHook<W: TextWrite> {
     _phantom: core::marker::PhantomData<W>,
-    writer: html::Writer,
     options: HeaderFooterHtmlRendererOptions,
 }
 
 impl<W: TextWrite> HeaderPreRenderHook<W> {
-    fn with_options(html_opts: Options, options: HeaderFooterHtmlRendererOptions) -> Self {
+    fn with_options(options: HeaderFooterHtmlRendererOptions) -> Self {
         Self {
             _phantom: core::marker::PhantomData,
-            writer: html::Writer::with_options(html_opts),
             options,
         }
     }
@@ -467,22 +460,20 @@ impl<W: TextWrite> PreRender<W> for HeaderPreRenderHook<W> {
         _render: &dyn Render<W>,
         _context: &mut renderer::Context,
     ) -> Result<()> {
-        self.writer.write_html(w, self.options.header.as_str())?;
+        html::write_html(w, self.options.header.as_str())?;
         Ok(())
     }
 }
 
 struct FooterPostRenderHook<W: TextWrite> {
     _phantom: core::marker::PhantomData<W>,
-    writer: html::Writer,
     options: HeaderFooterHtmlRendererOptions,
 }
 
 impl<W: TextWrite> FooterPostRenderHook<W> {
-    fn with_options(html_opts: Options, options: HeaderFooterHtmlRendererOptions) -> Self {
+    fn with_options(options: HeaderFooterHtmlRendererOptions) -> Self {
         Self {
             _phantom: core::marker::PhantomData,
-            writer: html::Writer::with_options(html_opts),
             options,
         }
     }
@@ -498,7 +489,7 @@ impl<W: TextWrite> PostRender<W> for FooterPostRenderHook<W> {
         _render: &dyn Render<W>,
         _context: &mut renderer::Context,
     ) -> Result<()> {
-        self.writer.write_html(w, self.options.footer.as_str())?;
+        html::write_html(w, self.options.footer.as_str())?;
         Ok(())
     }
 }

@@ -146,3 +146,29 @@ fn test_render_options() {
     assert!(called);
     assert_eq!(out, "<p>hello</p>\n");
 }
+
+#[test]
+fn test_value_write_to_decodes_and_encodes_in_one_pass() {
+    use rushdown::{
+        renderer::html,
+        text::{Decoder, Index, Value},
+    };
+    let src = "a &lt;b&gt; \\* &amp;x &#35; \\ y &unknown; \0";
+    for d in [Decoder::Default, Decoder::EscapedSpace, Decoder::Identity] {
+        let v = Value::from_index(Index::new(0, src.len()), d);
+        let mut one_pass = String::new();
+        v.write_to(&mut html::TextWriter::new(&mut one_pass), src)
+            .unwrap();
+        let mut two_pass = String::new();
+        html::write_text(&mut two_pass, &v.value(src)).unwrap();
+        assert_eq!(one_pass, two_pass);
+    }
+}
+
+#[test]
+fn test_link_url_writer() {
+    use rushdown::renderer::html;
+    let mut out = String::new();
+    html::write_link_url(&mut out, "/a b?x=1&y=\"é").unwrap();
+    assert_eq!(out, "/a%20b?x=1&amp;y=%22%C3%A9");
+}

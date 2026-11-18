@@ -10,9 +10,13 @@ use memchr::{memchr, memchr2};
 #[allow(unused_imports)]
 #[cfg(all(not(feature = "std"), feature = "no-std-unix-debug"))]
 use crate::println;
-use crate::util::{
-    self, is_blank, is_space, try_resolve_entity_reference, try_resolve_numeric_reference,
-    try_unescape_punct, utf8_len, TinyVec, UnescapePunctResult,
+use crate::{
+    error::Result,
+    renderer::TextWrite,
+    util::{
+        self, is_blank, is_space, try_resolve_entity_reference, try_resolve_numeric_reference,
+        try_unescape_punct, utf8_len, TinyVec, UnescapePunctResult,
+    },
 };
 
 const SPACE: &[u8] = b" ";
@@ -115,6 +119,58 @@ impl Decoder {
         }
         result.extend_from_slice(&bytes[n..]);
         Cow::Owned(result)
+    }
+
+    /// Decodes the given byte slice and writes the decoded text to `w` in a single pass,
+    /// without building an intermediate buffer.
+    ///
+    /// `b` must be valid UTF-8.
+    pub fn decode_to<W: TextWrite + ?Sized>(&self, w: &mut W, b: &[u8]) -> Result<()> {
+        // Chunks are split only at ASCII bytes, so they are valid UTF-8 if `b` is.
+        fn chunk<W: TextWrite + ?Sized>(w: &mut W, b: &[u8]) -> Result<()> {
+            if b.is_empty() {
+                return Ok(());
+            }
+            w.write_str(unsafe { core::str::from_utf8_unchecked(b) })
+        }
+        let escaped_space = match self {
+            Decoder::Identity => return chunk(w, b),
+            Decoder::Default => false,
+            Decoder::EscapedSpace => true,
+        };
+        let mut n = 0usize;
+        let mut pos = 0usize;
+        while let Some(rel) = memchr2(b'\\', b'&', &b[pos..]) {
+            let i = pos + rel;
+            pos = i + 1;
+            if b[i] == b'\\' {
+                match try_unescape_punct(b, i, escaped_space) {
+                    UnescapePunctResult::Punct(nbyte, ch) => {
+                        chunk(w, &b[n..i])?;
+                        w.write_char(ch as char)?;
+                        pos = i + nbyte + 1;
+                        n = pos;
+                    }
+                    UnescapePunctResult::Skipped(nbyte) => {
+                        chunk(w, &b[n..i])?;
+                        pos = i + nbyte + 1;
+                        n = pos;
+                    }
+                    UnescapePunctResult::None => {}
+                }
+            } else if let Some((nbyte, ch)) = try_resolve_numeric_reference(b, i) {
+                chunk(w, &b[n..i])?;
+                w.write_char(ch)?;
+                pos = i + nbyte + 1;
+                n = pos;
+            } else if let Some((nbyte, rep)) = try_resolve_entity_reference(b, i) {
+                chunk(w, &b[n..i])?;
+                w.write_str(rep)?;
+                pos = i + nbyte + 1;
+                n = pos;
+            }
+        }
+        chunk(w, &b[n..])
     }
 }
 
@@ -336,6 +392,24 @@ impl Value {
         match self.value_bytes(source) {
             Cow::Borrowed(b) => Cow::Borrowed(unsafe { core::str::from_utf8_unchecked(b) }),
             Cow::Owned(v) => Cow::Owned(unsafe { String::from_utf8_unchecked(v) }),
+        }
+    }
+
+    /// Writes the decoded and normalized value to `w` in a single pass.
+    /// If `w` is an encoder (e.g. an HTML escaping writer), the value is decoded and encoded
+    /// without any intermediate buffers.
+    pub fn write_to<W: TextWrite + ?Sized>(&self, w: &mut W, source: &str) -> Result<()> {
+        match self {
+            Value::Empty => Ok(()),
+            Value::Index(index, d) => d.decode_to(w, index.bytes(source)),
+            Value::Indices(indices, d) => {
+                for idx in indices.iter() {
+                    d.decode_to(w, idx.bytes(source))?;
+                }
+                Ok(())
+            }
+            Value::String(s, d) => d.decode_to(w, s.as_bytes()),
+            Value::CodeSpan(c) => w.write_str(&c.value(source)),
         }
     }
 

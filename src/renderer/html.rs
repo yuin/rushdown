@@ -10,11 +10,7 @@ use crate::{
     error::Error,
     matches_kind,
     renderer::{self, BuiltinNodesRenderer as _, *},
-    util::{
-        escape_html, escape_url, try_escape_html_byte, try_resolve_entity_reference,
-        try_resolve_numeric_reference, try_unescape_punct, AsciiWordSet, EscapeUrlOptions,
-        UnescapePunctResult,
-    },
+    util::{escape_html, escape_url, try_escape_html_byte, AsciiWordSet, EscapeUrlOptions},
 };
 
 // FormatOptions {{{
@@ -31,9 +27,6 @@ pub struct Options {
     /// Allows raw HTML and unsafe links.
     pub allows_unsafe: bool,
 
-    /// Indicates that a '\' escaped half-space(0x20) should not be rendered.
-    pub escaped_space: bool,
-
     /// Attribute filters for rendering.
     pub attribute_filters: Option<Rc<AttributeFilters>>,
 
@@ -47,7 +40,6 @@ impl core::fmt::Debug for Options {
             .field("hard_wraps", &self.hard_wraps)
             .field("xhtml", &self.xhtml)
             .field("allows_unsafe", &self.allows_unsafe)
-            .field("escaped_space", &self.escaped_space)
             .field("attribute_filters", &self.attribute_filters)
             .field(
                 "context_key_registry_initializer",
@@ -64,7 +56,6 @@ impl Default for Options {
             hard_wraps: false,
             xhtml: false,
             allows_unsafe: false,
-            escaped_space: false,
             attribute_filters: Some(Rc::new(AttributeFilters::default())),
             context_key_registry_initializer: None,
         }
@@ -219,7 +210,6 @@ macro_rules! write_attributes {
 #[derive(Debug)]
 pub struct BuiltinNodesRenderer<W: TextWrite = String> {
     format_options: Options,
-    writer: Writer,
     _phantom: core::marker::PhantomData<*const W>,
 }
 
@@ -228,7 +218,6 @@ impl<W: TextWrite> BuiltinNodesRenderer<W> {
     pub fn new(format_options: Options) -> Self {
         Self {
             format_options: format_options.clone(),
-            writer: Writer::with_options(format_options),
             _phantom: core::marker::PhantomData,
         }
     }
@@ -278,37 +267,33 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
             let render_p = !is_in_tight_list(arena, node_ref);
             context.push_pblock(render_p);
             if render_p {
-                self.writer.write_safe_str(w, "<p")?;
+                w.write_str("<p")?;
                 write_attributes!(arena, node_ref, source, w, self.format_options, paragraph);
-                self.writer.write_safe_str(w, ">")?;
+                w.write_str(">")?;
             }
             if let Some(task) = context.pop_task() {
                 match task {
                     Task::Completed => {
-                        self.writer.write_safe_str(
-                            w,
-                            r#"<input checked="" disabled="" type="checkbox""#,
-                        )?;
+                        w.write_str(r#"<input checked="" disabled="" type="checkbox""#)?;
                     }
                     Task::Active => {
-                        self.writer
-                            .write_safe_str(w, r#"<input disabled="" type="checkbox""#)?;
+                        w.write_str(r#"<input disabled="" type="checkbox""#)?;
                     }
                 }
                 if self.format_options.xhtml {
-                    self.writer.write_safe_str(w, " /> ")?;
+                    w.write_str(" /> ")?;
                 } else {
-                    self.writer.write_safe_str(w, "> ")?;
+                    w.write_str("> ")?;
                 }
             }
         } else {
             let render_p = context.pop_pblock().unwrap_or(false);
             if render_p {
-                self.writer.write_safe_str(w, "</p>\n")?;
+                w.write_str("</p>\n")?;
             } else {
                 let n = &arena[node_ref];
                 if n.next_sibling().is_some() && n.first_child().is_some() {
-                    self.writer.write_newline(w)?;
+                    w.write_char('\n')?;
                 }
             }
         }
@@ -326,16 +311,14 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         if let KindData::Heading(heading) = arena[node_ref].kind_data() {
             if entering {
-                self.writer.write_safe_str(w, "<h")?;
-                self.writer
-                    .write_safe_str(w, SafeBytes(&[b'0' + heading.level()]))?;
+                w.write_str("<h")?;
+                write_bytes(w, &[b'0' + heading.level()])?;
                 write_attributes!(arena, node_ref, source, w, self.format_options, heading);
-                self.writer.write_safe_str(w, ">")?;
+                w.write_str(">")?;
             } else {
-                self.writer.write_safe_str(w, "</h")?;
-                self.writer
-                    .write_safe_str(w, SafeBytes(&[b'0' + heading.level()]))?;
-                self.writer.write_safe_str(w, ">\n")?;
+                w.write_str("</h")?;
+                write_bytes(w, &[b'0' + heading.level()])?;
+                w.write_str(">\n")?;
             }
         }
         Ok(WalkStatus::Continue)
@@ -354,7 +337,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
             return Ok(WalkStatus::Continue);
         }
         if entering {
-            self.writer.write_safe_str(w, "<hr")?;
+            w.write_str("<hr")?;
             write_attributes!(
                 arena,
                 node_ref,
@@ -364,9 +347,9 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
                 thematic_break
             );
             if self.format_options.xhtml {
-                self.writer.write_safe_str(w, " />\n")?;
+                w.write_str(" />\n")?;
             } else {
-                self.writer.write_safe_str(w, ">\n")?;
+                w.write_str(">\n")?;
             }
         }
         Ok(WalkStatus::Continue)
@@ -382,20 +365,20 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         _context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<pre><code")?;
+            w.write_str("<pre><code")?;
             let kd = as_kind_data!(arena, node_ref, CodeBlock);
             let lang = kd.language(source);
             if let Some(lang) = lang.as_option() {
-                self.writer.write_safe_str(w, " class=\"language-")?;
-                self.writer.raw_write(w, &lang.value(source))?;
-                self.writer.write_safe_str(w, "\"")?;
+                w.write_str(" class=\"language-")?;
+                lang.write_to(&mut TextWriter::new(w), source)?;
+                w.write_str("\"")?;
             }
-            self.writer.write_safe_str(w, ">")?;
+            w.write_str(">")?;
             for line in kd.value().iter(source) {
-                self.writer.raw_write(w, &line)?;
+                write_text(w, &line)?;
             }
         } else {
-            self.writer.write_safe_str(w, "</code></pre>\n")?;
+            w.write_str("</code></pre>\n")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -410,11 +393,11 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         _context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<blockquote")?;
+            w.write_str("<blockquote")?;
             write_attributes!(arena, node_ref, source, w, self.format_options, blockquote);
-            self.writer.write_safe_str(w, ">\n")?;
+            w.write_str(">\n")?;
         } else {
-            self.writer.write_safe_str(w, "</blockquote>\n")?;
+            w.write_str("</blockquote>\n")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -431,20 +414,20 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         let node = as_kind_data!(arena, node_ref, List);
         let tag = if node.is_ordered() { "ol" } else { "ul" };
         if entering {
-            self.writer.write_safe_str(w, "<")?;
-            self.writer.write_safe_str(w, tag)?;
+            w.write_str("<")?;
+            w.write_str(tag)?;
             if node.is_ordered() && node.start() != 1 {
-                self.writer.write_safe_str(w, " start=\"")?;
+                w.write_str(" start=\"")?;
                 let start = node.start().to_string();
-                self.writer.write_safe_str(w, SafeBytes(start.as_bytes()))?;
-                self.writer.write_safe_str(w, "\"")?;
+                write_bytes(w, start.as_bytes())?;
+                w.write_str("\"")?;
             }
             write_attributes!(arena, node_ref, source, w, self.format_options, list);
-            self.writer.write_safe_str(w, ">\n")?;
+            w.write_str(">\n")?;
         } else {
-            self.writer.write_safe_str(w, "</")?;
-            self.writer.write_safe_str(w, tag)?;
-            self.writer.write_safe_str(w, ">\n")?;
+            w.write_str("</")?;
+            w.write_str(tag)?;
+            w.write_str(">\n")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -459,21 +442,21 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<li")?;
+            w.write_str("<li")?;
             write_attributes!(arena, node_ref, source, w, self.format_options, list_item);
-            self.writer.write_safe_str(w, ">")?;
+            w.write_str(">")?;
             if let Some(p) = arena[node_ref].parent() {
                 if let KindData::List(list) = arena[p].kind_data() {
                     if let Some(first_child) = arena[node_ref].first_child() {
                         if !list.is_tight() || !matches_kind!(arena, first_child, Paragraph) {
-                            self.writer.write_newline(w)?;
+                            w.write_char('\n')?;
                         }
                     }
                 }
             }
             context.set_task(as_kind_data!(arena, node_ref, ListItem).task());
         } else {
-            self.writer.write_safe_str(w, "</li>\n")?;
+            w.write_str("</li>\n")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -491,11 +474,10 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
             if self.format_options.allows_unsafe {
                 let kd = as_kind_data!(arena, node_ref, HtmlBlock);
                 for line in kd.value().iter(source) {
-                    self.writer.write_html(w, &line)?;
+                    write_html(w, &line)?;
                 }
             } else {
-                self.writer
-                    .write_safe_str(w, "<!-- raw HTML omitted -->\n")?;
+                w.write_str("<!-- raw HTML omitted -->\n")?;
             }
         }
         Ok(WalkStatus::Continue)
@@ -522,11 +504,11 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         _context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<table")?;
+            w.write_str("<table")?;
             write_attributes!(arena, node_ref, source, w, self.format_options, table);
-            self.writer.write_safe_str(w, ">\n")?;
+            w.write_str(">\n")?;
         } else {
-            self.writer.write_safe_str(w, "</table>\n")?;
+            w.write_str("</table>\n")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -541,7 +523,7 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         _context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<thead")?;
+            w.write_str("<thead")?;
             write_attributes!(
                 arena,
                 node_ref,
@@ -550,9 +532,9 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
                 self.format_options,
                 table_header
             );
-            self.writer.write_safe_str(w, ">\n")?;
+            w.write_str(">\n")?;
         } else {
-            self.writer.write_safe_str(w, "</thead>\n")?;
+            w.write_str("</thead>\n")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -567,9 +549,9 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         _context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<tbody>\n")?;
+            w.write_str("<tbody>\n")?;
         } else {
-            self.writer.write_safe_str(w, "</tbody>\n")?;
+            w.write_str("</tbody>\n")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -584,11 +566,11 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         _context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<tr")?;
+            w.write_str("<tr")?;
             write_attributes!(arena, node_ref, source, w, self.format_options, table_row);
-            self.writer.write_safe_str(w, ">\n")?;
+            w.write_str(">\n")?;
         } else {
-            self.writer.write_safe_str(w, "</tr>\n")?;
+            w.write_str("</tr>\n")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -613,33 +595,33 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         };
 
         if entering {
-            self.writer.write_safe_str(w, "<")?;
-            self.writer.write_safe_str(w, SafeBytes(tag.as_bytes()))?;
+            w.write_str("<")?;
+            write_bytes(w, tag.as_bytes())?;
             if self.format_options.xhtml {
                 match as_kind_data!(arena, node_ref, TableCell).alignment() {
                     TableCellAlignment::None => {}
                     n => {
-                        self.writer.write_safe_str(w, r#" align=""#)?;
-                        self.writer.write(w, n.as_str())?;
-                        self.writer.write_safe_str(w, r#"""#)?;
+                        w.write_str(r#" align=""#)?;
+                        w.write_str(n.as_str())?;
+                        w.write_str(r#"""#)?;
                     }
                 }
             } else {
                 match as_kind_data!(arena, node_ref, TableCell).alignment() {
                     TableCellAlignment::None => {}
                     n => {
-                        self.writer.write_safe_str(w, r#" style="text-align: "#)?;
-                        self.writer.write(w, n.as_str())?;
-                        self.writer.write_safe_str(w, r#";""#)?;
+                        w.write_str(r#" style="text-align: "#)?;
+                        w.write_str(n.as_str())?;
+                        w.write_str(r#";""#)?;
                     }
                 }
             }
             write_attributes!(arena, node_ref, source, w, self.format_options, table_cell);
-            self.writer.write_safe_str(w, ">")?;
+            w.write_str(">")?;
         } else {
-            self.writer.write_safe_str(w, "</")?;
-            self.writer.write_safe_str(w, SafeBytes(tag.as_bytes()))?;
-            self.writer.write_safe_str(w, ">\n")?;
+            w.write_str("</")?;
+            write_bytes(w, tag.as_bytes())?;
+            w.write_str(">\n")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -655,18 +637,18 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         if entering {
             let kd = as_kind_data!(arena, node_ref, Text);
-            self.writer.raw_write(w, &kd.value().value(source))?;
+            kd.value().write_to(&mut TextWriter::new(w), source)?;
             if kd.has_qualifiers(TextQualifier::HARD_LINE_BREAK)
                 || (kd.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
                     && self.format_options.hard_wraps)
             {
                 if self.format_options.xhtml {
-                    self.writer.write_safe_str(w, "<br />\n")?;
+                    w.write_str("<br />\n")?;
                 } else {
-                    self.writer.write_safe_str(w, "<br>\n")?;
+                    w.write_str("<br>\n")?;
                 }
             } else if kd.has_qualifiers(TextQualifier::SOFT_LINE_BREAK) {
-                self.writer.write_newline(w)?;
+                w.write_char('\n')?;
             }
         }
         Ok(WalkStatus::Continue)
@@ -683,13 +665,13 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         if entering {
             let kd = as_kind_data!(arena, node_ref, CodeSpan);
-            self.writer.write_safe_str(w, "<code")?;
+            w.write_str("<code")?;
             write_attributes!(arena, node_ref, source, w, self.format_options, code_span);
-            self.writer.write_safe_str(w, ">")?;
-            self.writer.raw_write(w, &kd.value().value(source))?;
+            w.write_str(">")?;
+            kd.value().write_to(&mut TextWriter::new(w), source)?;
             return Ok(WalkStatus::SkipChildren);
         } else {
-            self.writer.write_safe_str(w, "</code>")?;
+            w.write_str("</code>")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -704,9 +686,9 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         _context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<em>")?;
+            w.write_str("<em>")?;
         } else {
-            self.writer.write_safe_str(w, "</em>")?;
+            w.write_str("</em>")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -721,9 +703,9 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         _context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<strong>")?;
+            w.write_str("<strong>")?;
         } else {
-            self.writer.write_safe_str(w, "</strong>")?;
+            w.write_str("</strong>")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -739,36 +721,32 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         let kd = as_kind_data!(arena, node_ref, Link);
         if entering {
-            let mut dest = escape_url(
-                kd.destination().value_bytes(source),
-                &EscapeUrlOptions::for_url(),
-            );
-            self.writer.write_safe_str(w, "<a href=\"")?;
-            if self.format_options.allows_unsafe || !is_dangerous_url(&dest) {
-                dest = escape_html(dest);
-                self.writer.write_safe_str(w, SafeBytes(&dest))?;
+            let dest = kd.destination().value(source);
+            w.write_str("<a href=\"")?;
+            if self.format_options.allows_unsafe || !is_dangerous_url(dest.as_bytes()) {
+                write_link_url(w, &dest)?;
             }
-            self.writer.write_safe_str(w, "\"")?;
+            w.write_str("\"")?;
             if let Some(title) = kd.title().as_option() {
-                self.writer.write_safe_str(w, " title=\"")?;
-                self.writer.raw_write(w, &title.value(source))?;
-                self.writer.write_safe_str(w, "\"")?;
+                w.write_str(" title=\"")?;
+                title.write_to(&mut TextWriter::new(w), source)?;
+                w.write_str("\"")?;
             }
             write_attributes!(arena, node_ref, source, w, self.format_options, link);
-            self.writer.write_safe_str(w, ">")?;
+            w.write_str(">")?;
             if matches!(kd.link_kind(), LinkKind::Auto(_)) {
                 if let Some(fc) = arena[node_ref].first_child() {
                     if matches_kind!(arena, fc, Text) {
                         let t = as_kind_data!(arena, fc, Text);
-                        self.writer.raw_write(w, &t.value().value(source))?;
-                        self.writer.write_safe_str(w, "</a>")?;
+                        t.value().write_to(&mut TextWriter::new(w), source)?;
+                        w.write_str("</a>")?;
                     }
                 }
                 return Ok(WalkStatus::SkipChildren);
             }
         } else {
             if !matches!(kd.link_kind(), LinkKind::Auto(_)) {
-                self.writer.write_safe_str(w, "</a>")?;
+                w.write_str("</a>")?;
             }
         }
         Ok(WalkStatus::Continue)
@@ -785,22 +763,18 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
     ) -> Result<WalkStatus> {
         if entering {
             let kd = as_kind_data!(arena, node_ref, Image);
-            let mut dest = escape_url(
-                kd.destination().value_bytes(source),
-                &EscapeUrlOptions::for_url(),
-            );
-            self.writer.write_safe_str(w, "<img src=\"")?;
-            if self.format_options.allows_unsafe || !is_dangerous_url(&dest) {
-                dest = escape_html(dest);
-                self.writer.write_safe_str(w, SafeBytes(&dest))?;
+            let dest = kd.destination().value(source);
+            w.write_str("<img src=\"")?;
+            if self.format_options.allows_unsafe || !is_dangerous_url(dest.as_bytes()) {
+                write_link_url(w, &dest)?;
             }
-            self.writer.write_safe_str(w, "\" alt=\"")?;
+            w.write_str("\" alt=\"")?;
             self.render_texts(w, source, arena, node_ref, ctx)?;
-            self.writer.write_safe_str(w, "\"")?;
+            w.write_str("\"")?;
             if let Some(title) = kd.title().as_option() {
-                self.writer.write_safe_str(w, " title=\"")?;
-                self.writer.raw_write(w, &title.value(source))?;
-                self.writer.write_safe_str(w, "\"")?;
+                w.write_str(" title=\"")?;
+                title.write_to(&mut TextWriter::new(w), source)?;
+                w.write_str("\"")?;
             }
             write_attributes!(arena, node_ref, source, w, self.format_options, image);
             if self.format_options.xhtml {
@@ -824,9 +798,9 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         if entering {
             let kd = as_kind_data!(arena, node_ref, RawHtml);
             if self.format_options.allows_unsafe {
-                self.writer.write_html(w, &kd.str(source))?;
+                write_html(w, &kd.str(source))?;
             } else {
-                self.writer.write_safe_str(w, "<!-- raw HTML omitted -->")?;
+                w.write_str("<!-- raw HTML omitted -->")?;
             }
         }
         Ok(WalkStatus::Continue)
@@ -842,9 +816,9 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
         _context: &mut Context,
     ) -> Result<WalkStatus> {
         if entering {
-            self.writer.write_safe_str(w, "<del>")?;
+            w.write_str("<del>")?;
         } else {
-            self.writer.write_safe_str(w, "</del>")?;
+            w.write_str("</del>")?;
         }
         Ok(WalkStatus::Continue)
     }
@@ -1036,147 +1010,121 @@ impl<'r, W: TextWrite> Renderer<'r, W> {
 
 // }}} Renderer
 
-// Writer {{{
-/// A writer for HTML output.
-/// All HTML renderer should use this for writing HTML content for proper escaping.
-#[derive(Debug, Default)]
-pub struct Writer {
-    options: Options,
-}
+// Writers {{{
 
 const REPLACEMENT_CHAR: char = '\u{FFFD}';
 
-impl Writer {
-    /// Creates a new [`Writer`] with default options.
-    pub fn new() -> Self {
-        Self::default()
-    }
+/// A [`TextWrite`] adapter that writes HTML content.
+/// This writer replaces insecure HTML characters(null characters).
+pub struct HtmlWriter<'w, W: TextWrite + ?Sized>(&'w mut W);
 
-    /// Creates a new [`Writer`] with the given HTML options.
-    pub fn with_options(options: Options) -> Self {
-        Self { options }
-    }
-
-    /// Writes the given `s` to `w` with:
-    ///
-    /// - resolving references and unescaping
-    /// - backslash escaped characters
-    /// - replacing insecure HTML characters(null characters)
-    /// - replacing HTML entities(`<`, `>`, `&`, `"`, `'`, and so on)
-    pub fn write<W: TextWrite + ?Sized>(&self, w: &mut W, s: &str) -> Result<()> {
-        let bytes = s.as_bytes();
-        let mut i = 0usize;
-
-        while let Some(rel) = memchr::memchr2(b'\\', b'&', &bytes[i..]) {
-            self.raw_write(w, &s[i..i + rel])?;
-            let c = bytes[i + rel];
-            if c == b'\\' {
-                match try_unescape_punct(bytes, i + rel, self.options.escaped_space) {
-                    UnescapePunctResult::Punct(nbyte, ch) => {
-                        if let Some(esc) = try_escape_html_byte(ch) {
-                            w.write_str(esc)?;
-                        } else {
-                            w.write_char(ch as char)?;
-                        }
-                        i += rel + nbyte + 1;
-                        continue;
-                    }
-                    UnescapePunctResult::Skipped(nbyte) => {
-                        i += rel + nbyte + 1;
-                        continue;
-                    }
-                    UnescapePunctResult::None => {
-                        w.write_char('\\')?;
-                    }
-                }
-            }
-            if c == b'&' {
-                if let Some((nbyte, ch)) = try_resolve_numeric_reference(bytes, i + rel) {
-                    let mut buf = [0u8; 4];
-                    let s: &str = ch.encode_utf8(&mut buf);
-                    self.raw_write(w, s)?;
-                    i += rel + nbyte + 1;
-                    continue;
-                }
-                if let Some((nbyte, ch)) = try_resolve_entity_reference(bytes, i + rel) {
-                    self.raw_write(w, ch)?;
-                    i += rel + nbyte + 1;
-                    continue;
-                }
-                w.write_str("&amp;")?;
-            }
-            i += rel + 1;
-        }
-        if i != bytes.len() {
-            self.raw_write(w, &s[i..])?;
-        }
-        Ok(())
-    }
-
-    /// Writes the given `s` to `w` with:
-    ///
-    /// - replacing insecure HTML characters(null characters)
-    /// - replacing HTML entities(`<`, `>`, `&`, `"`, `'`, and so on)
-    pub fn raw_write<W: TextWrite + ?Sized>(&self, w: &mut W, s: &str) -> Result<()> {
-        let bytes = s.as_bytes();
-        let mut n = 0;
-
-        for (i, &b) in bytes.iter().enumerate() {
-            if let Some(rep) = try_escape_html_byte(b) {
-                if i != n {
-                    write_bytes(w, &bytes[n..i])?;
-                }
-                w.write_str(rep)?;
-                n = i + 1;
-            }
-        }
-
-        if n != bytes.len() {
-            write_bytes(w, &bytes[n..])?;
-        }
-
-        Ok(())
-    }
-
-    /// Writes the given `s` to `w` with:
-    ///
-    /// - replacing insecure HTML characters(null characters)
-    pub fn write_html<W: TextWrite + ?Sized>(&self, w: &mut W, s: &str) -> Result<()> {
-        let bytes = s.as_bytes();
-        let mut i = 0;
-
-        while let Some(rel) = memchr::memchr(0, &bytes[i..]) {
-            let j = i + rel;
-            if j != i {
-                write_bytes(w, &bytes[i..j])?;
-            }
-            w.write_char(REPLACEMENT_CHAR)?;
-            i = j + 1;
-        }
-
-        if i != bytes.len() {
-            write_bytes(w, &bytes[i..])?;
-        }
-
-        Ok(())
-    }
-
-    /// Writes the given `s` to `w`.
-    /// This function does not perform any escaping or processing.
-    /// So use this only for safe strings.
+impl<'w, W: TextWrite + ?Sized> HtmlWriter<'w, W> {
+    /// Creates a new [`HtmlWriter`] that writes to `w`.
     #[inline(always)]
-    pub fn write_safe_str<W: TextWrite + ?Sized, S: SafeStr>(&self, w: &mut W, s: S) -> Result<()> {
-        w.write_str(s.as_str())
-    }
-
-    /// Writes a newline.
-    #[inline(always)]
-    pub fn write_newline<W: TextWrite + ?Sized>(&self, w: &mut W) -> Result<()> {
-        w.write_char('\n')
+    pub fn new(w: &'w mut W) -> Self {
+        Self(w)
     }
 }
 
-// }}} Writer
+impl<W: TextWrite + ?Sized> TextWrite for HtmlWriter<'_, W> {
+    fn write_str(&mut self, s: &str) -> Result<()> {
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while let Some(rel) = memchr::memchr(0, &bytes[i..]) {
+            let j = i + rel;
+            if j != i {
+                self.0.write_str(&s[i..j])?;
+            }
+            self.0.write_char(REPLACEMENT_CHAR)?;
+            i = j + 1;
+        }
+        if i != bytes.len() {
+            self.0.write_str(&s[i..])?;
+        }
+        Ok(())
+    }
+}
+
+/// A [`TextWrite`] adapter that writes text content.
+/// This writer replaces insecure HTML characters(null characters) and
+/// escapes HTML special characters(`<`, `>`, `&`, `"`).
+///
+/// Passing this writer to [`text::Value::write_to`](crate::text::Value::write_to)
+/// decodes and encodes the value in a single pass.
+pub struct TextWriter<'w, W: TextWrite + ?Sized>(&'w mut W);
+
+impl<'w, W: TextWrite + ?Sized> TextWriter<'w, W> {
+    /// Creates a new [`TextWriter`] that writes to `w`.
+    #[inline(always)]
+    pub fn new(w: &'w mut W) -> Self {
+        Self(w)
+    }
+}
+
+impl<W: TextWrite + ?Sized> TextWrite for TextWriter<'_, W> {
+    fn write_str(&mut self, s: &str) -> Result<()> {
+        let bytes = s.as_bytes();
+        let mut n = 0;
+        for (i, &b) in bytes.iter().enumerate() {
+            if let Some(rep) = try_escape_html_byte(b) {
+                if i != n {
+                    self.0.write_str(&s[n..i])?;
+                }
+                self.0.write_str(rep)?;
+                n = i + 1;
+            }
+        }
+        if n != bytes.len() {
+            self.0.write_str(&s[n..])?;
+        }
+        Ok(())
+    }
+}
+
+/// Writes the given `s` to `w` with:
+///
+/// - replacing insecure HTML characters(null characters)
+/// - replacing HTML entities(`<`, `>`, `&`, `"`)
+///
+/// `s` is not decoded. To write a [`text::Value`](crate::text::Value),
+/// use [`text::Value::write_to`](crate::text::Value::write_to) with a [`TextWriter`].
+#[inline]
+pub fn write_text<W: TextWrite + ?Sized>(w: &mut W, s: &str) -> Result<()> {
+    TextWriter(w).write_str(s)
+}
+
+/// A [`TextWrite`] adapter that writes link URL content.
+/// This writer URL-escapes the content and then escapes HTML special characters.
+pub struct LinkUrlWriter<'w, W: TextWrite + ?Sized>(&'w mut W);
+
+impl<'w, W: TextWrite + ?Sized> LinkUrlWriter<'w, W> {
+    /// Creates a new [`LinkUrlWriter`] that writes to `w`.
+    #[inline(always)]
+    pub fn new(w: &'w mut W) -> Self {
+        Self(w)
+    }
+}
+
+impl<W: TextWrite + ?Sized> TextWrite for LinkUrlWriter<'_, W> {
+    fn write_str(&mut self, s: &str) -> Result<()> {
+        let url = escape_url(s.as_bytes(), &EscapeUrlOptions::for_url());
+        write_bytes(self.0, &escape_html(url))
+    }
+}
+
+/// Writes the given link URL `s` to `w` with URL escaping and HTML escaping.
+#[inline]
+pub fn write_link_url<W: TextWrite + ?Sized>(w: &mut W, s: &str) -> Result<()> {
+    LinkUrlWriter(w).write_str(s)
+}
+
+/// Writes the given `s` to `w` with replacing insecure HTML characters(null characters).
+#[inline]
+pub fn write_html<W: TextWrite + ?Sized>(w: &mut W, s: &str) -> Result<()> {
+    HtmlWriter(w).write_str(s)
+}
+
+// }}} Writers
 
 // Utilities {{{
 
@@ -1200,8 +1148,7 @@ pub fn render_attributes<W: TextWrite>(
         w.write_str(" ")?;
         w.write_str(key)?;
         w.write_str("=\"")?;
-        let resolved = value.value(source);
-        write_bytes(w, &escape_html(resolved.as_bytes()))?;
+        value.write_to(&mut TextWriter::new(w), source)?;
         w.write_str("\"")?;
     }
     Ok(())
@@ -1218,33 +1165,6 @@ pub fn is_in_tight_list(arena: &ast::Arena, node_ref: ast::NodeRef) -> bool {
         }
     }
     false
-}
-
-pub(crate) mod private {
-    pub trait Sealed {}
-}
-
-/// Marker trait for safe strings.
-pub trait SafeStr: private::Sealed {
-    fn as_str(&self) -> &str;
-}
-
-impl private::Sealed for &'static str {}
-impl SafeStr for &'static str {
-    #[inline(always)]
-    fn as_str(&self) -> &str {
-        self
-    }
-}
-
-pub(crate) struct SafeBytes<'a>(&'a [u8]); // only valid within this crate;
-
-impl private::Sealed for SafeBytes<'_> {}
-impl<'a> SafeStr for SafeBytes<'a> {
-    #[inline(always)]
-    fn as_str(&self) -> &str {
-        unsafe { core::str::from_utf8_unchecked(self.0) }
-    }
 }
 
 #[inline]
@@ -1299,30 +1219,18 @@ pub fn is_dangerous_url(url: &[u8]) -> bool {
 
 // ParagraphRenderer {{{
 
-/// Context for the paragraph renderer, containing the HTML writer, format options, and paragraph
+/// Context for the paragraph renderer, containing the format options, and paragraph
 pub struct ParagraphRendererContext {
-    writer: html::Writer,
     format_options: Options,
     options: ParagraphRendererOptions,
 }
 
 impl ParagraphRendererContext {
-    fn new(
-        writer: html::Writer,
-        format_options: Options,
-        options: ParagraphRendererOptions,
-    ) -> Self {
+    fn new(format_options: Options, options: ParagraphRendererOptions) -> Self {
         Self {
-            writer,
             format_options,
             options,
         }
-    }
-
-    /// Returns a reference to the internal HTML writer.
-    #[inline(always)]
-    pub fn writer(&self) -> &html::Writer {
-        &self.writer
     }
 
     /// Returns a reference to the format options.
@@ -1378,11 +1286,7 @@ impl<W: TextWrite> ParagraphRenderer<W> {
         let is_in_tight_block = options.is_in_tight_block.unwrap_or(is_in_tight_list);
         Self {
             _phantom: core::marker::PhantomData,
-            ctx: ParagraphRendererContext::new(
-                html::Writer::with_options(html_opts.clone()),
-                html_opts,
-                options,
-            ),
+            ctx: ParagraphRendererContext::new(html_opts, options),
             is_in_tight_block,
         }
     }
@@ -1402,7 +1306,7 @@ impl<W: TextWrite> RenderNode<W> for ParagraphRenderer<W> {
             let render_p = !(self.is_in_tight_block)(arena, node_ref);
             context.push_pblock(render_p);
             if render_p {
-                self.ctx.writer.write_safe_str(w, "<p")?;
+                w.write_str("<p")?;
                 write_attributes!(
                     arena,
                     node_ref,
@@ -1411,7 +1315,7 @@ impl<W: TextWrite> RenderNode<W> for ParagraphRenderer<W> {
                     self.ctx.format_options,
                     paragraph
                 );
-                self.ctx.writer.write_safe_str(w, ">")?;
+                w.write_str(">")?;
             }
             if let Some(task) = context.pop_task() {
                 if let Some(ref r) = self.ctx.options.render_task_list_item {
@@ -1426,32 +1330,27 @@ impl<W: TextWrite> RenderNode<W> for ParagraphRenderer<W> {
                 } else {
                     match task {
                         Task::Completed => {
-                            self.ctx.writer.write_safe_str(
-                                w,
-                                r#"<input checked="" disabled="" type="checkbox""#,
-                            )?;
+                            w.write_str(r#"<input checked="" disabled="" type="checkbox""#)?;
                         }
                         Task::Active => {
-                            self.ctx
-                                .writer
-                                .write_safe_str(w, r#"<input disabled="" type="checkbox""#)?;
+                            w.write_str(r#"<input disabled="" type="checkbox""#)?;
                         }
                     }
                     if self.ctx.format_options.xhtml {
-                        self.ctx.writer.write_safe_str(w, " /> ")?;
+                        w.write_str(" /> ")?;
                     } else {
-                        self.ctx.writer.write_safe_str(w, "> ")?;
+                        w.write_str("> ")?;
                     }
                 }
             }
         } else {
             let render_p = context.pop_pblock().unwrap_or(false);
             if render_p {
-                self.ctx.writer.write_safe_str(w, "</p>\n")?;
+                w.write_str("</p>\n")?;
             } else {
                 let n = &arena[node_ref];
                 if n.next_sibling().is_some() && n.first_child().is_some() {
-                    self.ctx.writer.write_newline(w)?;
+                    w.write_char('\n')?;
                 }
             }
         }

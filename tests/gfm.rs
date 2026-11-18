@@ -141,16 +141,16 @@ fn test_task_list_item_override() {
         gfm(GfmOptions::default()),
         html::paragraph_renderer(html::ParagraphRendererOptions {
             render_task_list_item: Some(Box::new(
-                |w, _source, arena, list_ref, _context, pctx| -> Result<()> {
+                |w, _source, arena, list_ref, _context, _pctx| -> Result<()> {
                     let task = as_kind_data!(arena, list_ref, ListItem).task().unwrap();
                     let css_class = match task {
                         Task::Active => "task-list-item-unchecked",
                         Task::Completed => "task-list-item-checked",
                         _ => unreachable!(),
                     };
-                    pctx.writer().write_safe_str(w, "<span class=\"")?;
-                    pctx.writer().write(w, css_class)?;
-                    pctx.writer().write_safe_str(w, "\"></span>")?;
+                    w.write_str("<span class=\"")?;
+                    html::write_text(w, css_class)?;
+                    w.write_str("\"></span>")?;
                     Ok(())
                 },
             )),
