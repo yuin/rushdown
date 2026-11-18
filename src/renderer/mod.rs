@@ -18,7 +18,7 @@ use crate::{
     ast::{self, *},
     context::{self, AnyValueSpec, ContextKey, ContextKeyRegistry},
     error::{CallbackError, Error, Result},
-    util::{HashMap, Prioritized},
+    util::HashMap,
 };
 
 // TextWrite {{{
@@ -379,12 +379,9 @@ pub struct RendererHelper<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> {
     node_kinds: Rc<RefCell<NodeKindRegistry>>,
     context_key_registry: Rc<RefCell<ContextKeyRegistry>>,
     node_renderers: Vec<Option<BoxRenderNode<'r, W>>>,
-
-    tmp_pre_render_hooks: Option<Vec<Prioritized<BoxPreRender<'r, W>>>>,
-    pre_render_hooks: Option<Vec<BoxPreRender<'r, W>>>,
-
-    tmp_post_render_hooks: Option<Vec<Prioritized<BoxPostRender<'r, W>>>>,
-    post_render_hooks: Option<Vec<BoxPostRender<'r, W>>>,
+    // decorators per node kind, in registration order(the last one is the outermost).
+    node_decorators: Vec<Vec<BoxRenderNodeDecorator<'r, W>>>,
+    has_node_decorators: bool,
 
     builtin_node_renderer: B,
 
@@ -419,11 +416,35 @@ pub struct RendererHelper<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> {
 /// A trait for registering node renderers.
 pub trait NodeRendererRegistry<'r, W> {
     fn register_node_renderer_fn(&mut self, type_id: TypeId, renderer_fn: BoxRenderNode<'r, W>);
+
+    /// Registers a decorator for the node kind identified by `type_id`.
+    ///
+    /// If decorators are already registered for the node kind, the new decorator wraps
+    /// the existing ones: it is called first and the existing ones are reachable
+    /// through [`NextRenderNode`].
+    fn register_node_renderer_decorator_fn(
+        &mut self,
+        type_id: TypeId,
+        decorator: BoxRenderNodeDecorator<'r, W>,
+    );
 }
 
 impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> NodeRendererRegistry<'r, W>
     for RendererHelper<'r, W, B, O>
 {
+    fn register_node_renderer_decorator_fn(
+        &mut self,
+        type_id: TypeId,
+        decorator: BoxRenderNodeDecorator<'r, W>,
+    ) {
+        let kind_id = self.node_kinds.borrow_mut().register_by_type_id(type_id);
+        if kind_id.0 >= self.node_decorators.len() {
+            self.node_decorators.resize_with(kind_id.0 + 1, Vec::new)
+        }
+        self.node_decorators[kind_id.0].push(decorator);
+        self.has_node_decorators = true;
+    }
+
     fn register_node_renderer_fn(&mut self, type_id: TypeId, renderer_fn: BoxRenderNode<'r, W>) {
         let kind_id = self.node_kinds.borrow_mut().register_by_type_id(type_id);
         if kind_id.0 >= self.node_renderers.len() {
@@ -487,10 +508,8 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
             node_kinds: Rc::new(RefCell::new(NodeKindRegistry::default())),
             context_key_registry: Rc::new(RefCell::new(ContextKeyRegistry::default())),
             node_renderers: Vec::new(),
-            tmp_pre_render_hooks: None,
-            pre_render_hooks: None,
-            tmp_post_render_hooks: None,
-            post_render_hooks: None,
+            node_decorators: Vec::new(),
+            has_node_decorators: false,
             builtin_node_renderer,
             document_override: false,
             paragraph_override: false,
@@ -526,20 +545,6 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
     /// Renderer implementations should call this method in their constructors.
     pub fn init(&mut self) {
         self.node_kinds.borrow_mut().freeze();
-        if let Some(mut tmp_hooks) = self.tmp_pre_render_hooks.take() {
-            tmp_hooks.sort();
-            self.pre_render_hooks = Some(Vec::with_capacity(tmp_hooks.len()));
-            for mut h in tmp_hooks.drain(..) {
-                self.pre_render_hooks.as_mut().unwrap().push(h.take());
-            }
-        }
-        if let Some(mut tmp_hooks) = self.tmp_post_render_hooks.take() {
-            tmp_hooks.sort();
-            self.post_render_hooks = Some(Vec::with_capacity(tmp_hooks.len()));
-            for mut h in tmp_hooks.drain(..) {
-                self.post_render_hooks.as_mut().unwrap().push(h.take());
-            }
-        }
     }
 
     /// Adds a node renderer.
@@ -567,68 +572,6 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
         renderer.register_node_renderer_fn(self)
     }
 
-    /// Adds a pre render hook.
-    ///
-    /// `F` is a function or closure that constructs a node renderer.
-    /// F can take 0 to 4 arguments, each of which can be one of the following types:
-    ///
-    /// - `()`
-    /// - `O`: The format options type.
-    /// - `T`: The renderer options type.
-    /// - `Rc<RefCell<ContextKeyRegistry>>`
-    /// - `Rc<RefCell<NodeKindRegistry>>`
-    pub fn add_pre_render_hook<A, T, R, F>(&mut self, f: F, ropt: T, priority: u32)
-    where
-        T: RendererOptions,
-        F: RendererConstructor<A, O, T, R>,
-        R: PreRender<W> + 'r,
-    {
-        let hook = f.call(&RendererConstructorOptions {
-            format_options: self.format_options.clone(),
-            context_registry: self.context_key_registry.clone(),
-            node_kind_registry: self.node_kinds.clone(),
-            ropt: Cell::new(Some(ropt)),
-        });
-        if self.tmp_pre_render_hooks.is_none() {
-            self.tmp_pre_render_hooks = Some(Vec::new());
-        }
-        self.tmp_pre_render_hooks
-            .as_mut()
-            .unwrap()
-            .push(Prioritized::new(BoxPreRender::new(hook), priority));
-    }
-
-    /// Adds a post render hook.
-    ///
-    /// `F` is a function or closure that constructs a node renderer.
-    /// F can take 0 to 4 arguments, each of which can be one of the following types:
-    ///
-    /// - `()`
-    /// - `O`: The format options type.
-    /// - `T`: The renderer options type.
-    /// - `Rc<RefCell<ContextKeyRegistry>>`
-    /// - `Rc<RefCell<NodeKindRegistry>>`
-    pub fn add_post_render_hook<A, T, R, F>(&mut self, f: F, ropt: T, priority: u32)
-    where
-        T: RendererOptions,
-        F: RendererConstructor<A, O, T, R>,
-        R: PostRender<W> + 'r,
-    {
-        let hook = f.call(&RendererConstructorOptions {
-            format_options: self.format_options.clone(),
-            context_registry: self.context_key_registry.clone(),
-            node_kind_registry: self.node_kinds.clone(),
-            ropt: Cell::new(Some(ropt)),
-        });
-        if self.tmp_post_render_hooks.is_none() {
-            self.tmp_post_render_hooks = Some(Vec::new());
-        }
-        self.tmp_post_render_hooks
-            .as_mut()
-            .unwrap()
-            .push(Prioritized::new(BoxPostRender::new(hook), priority));
-    }
-
     /// Renders the AST to the given writer.
     pub fn render<'a>(
         &self,
@@ -644,23 +587,105 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
         if let Some(initializer) = options.context_initializer {
             initializer.initialize(context, &reg);
         }
-        let render = RenrererHelperRender { helper: self };
-
-        if let Some(pre_hooks) = &self.pre_render_hooks {
-            for hook in pre_hooks {
-                hook.pre_render(writer, source, arena, node_ref, &render, context)?;
-            }
-        }
-        render.render(writer, source, arena, node_ref, context)?;
-        if let Some(post_hooks) = &self.post_render_hooks {
-            for hook in post_hooks {
-                hook.post_render(writer, source, arena, node_ref, &render, context)?;
-            }
-        }
-        Ok(())
+        walk(arena, node_ref, &mut |arena: &Arena,
+                                    node_ref: NodeRef,
+                                    entering: bool|
+         -> Result<WalkStatus> {
+            self.render_node(writer, source, arena, node_ref, entering, context)
+        })
+        .map(|_| ())
+        .map_err(|e| match e {
+            CallbackError::Internal(err) => err,
+            CallbackError::Callback(err) => err,
+        })
     }
 
+    #[inline(always)]
     fn render_node<'a>(
+        &self,
+        writer: &mut W,
+        source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        context: &mut Context,
+    ) -> Result<WalkStatus> {
+        if self.has_node_decorators {
+            if let Some(kind_id) = self.decorated_kind_id(arena[node_ref].kind_data()) {
+                let n = self.node_decorators[kind_id].len();
+                return self.render_decorated(
+                    kind_id, n, writer, source, arena, node_ref, entering, context,
+                );
+            }
+        }
+        self.render_node_undecorated(writer, source, arena, node_ref, entering, context)
+    }
+
+    // Returns the kind id if decorators are registered for the kind of the given data.
+    #[cold]
+    fn decorated_kind_id(&self, kd: &KindData) -> Option<usize> {
+        let type_id = match kd {
+            KindData::Document(_) => TypeId::of::<Document>(),
+            KindData::Paragraph(_) => TypeId::of::<Paragraph>(),
+            KindData::Heading(_) => TypeId::of::<Heading>(),
+            KindData::ThematicBreak(_) => TypeId::of::<ThematicBreak>(),
+            KindData::CodeBlock(_) => TypeId::of::<CodeBlock>(),
+            KindData::Blockquote(_) => TypeId::of::<Blockquote>(),
+            KindData::List(_) => TypeId::of::<List>(),
+            KindData::ListItem(_) => TypeId::of::<ListItem>(),
+            KindData::HtmlBlock(_) => TypeId::of::<HtmlBlock>(),
+            KindData::LinkReferenceDefinition(_) => TypeId::of::<LinkReferenceDefinition>(),
+            KindData::Table(_) => TypeId::of::<Table>(),
+            KindData::TableHeader(_) => TypeId::of::<TableHeader>(),
+            KindData::TableBody(_) => TypeId::of::<TableBody>(),
+            KindData::TableRow(_) => TypeId::of::<TableRow>(),
+            KindData::TableCell(_) => TypeId::of::<TableCell>(),
+            KindData::Text(_) => TypeId::of::<Text>(),
+            KindData::CodeSpan(_) => TypeId::of::<CodeSpan>(),
+            KindData::Emphasis(_) => TypeId::of::<Emphasis>(),
+            KindData::Strong(_) => TypeId::of::<Strong>(),
+            KindData::Link(_) => TypeId::of::<Link>(),
+            KindData::Image(_) => TypeId::of::<Image>(),
+            KindData::RawHtml(_) => TypeId::of::<RawHtml>(),
+            KindData::Strikethrough(_) => TypeId::of::<Strikethrough>(),
+            KindData::Extension(ext) => (**ext).type_id(),
+        };
+        let id = self.node_kinds.borrow().get_by_type_id(type_id)?.0;
+        match self.node_decorators.get(id) {
+            Some(d) if !d.is_empty() => Some(id),
+            _ => None,
+        }
+    }
+
+    // Renders a node through the first `n` decorators of the given kind.
+    // The `n`-th decorator is the outermost one.
+    #[allow(clippy::too_many_arguments)]
+    fn render_decorated<'a>(
+        &self,
+        kind_id: usize,
+        n: usize,
+        writer: &mut W,
+        source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        context: &mut Context,
+    ) -> Result<WalkStatus> {
+        if n == 0 {
+            return self
+                .render_node_undecorated(writer, source, arena, node_ref, entering, context);
+        }
+        let next = NextRenderNode {
+            chain: self,
+            kind_id,
+            n: n - 1,
+        };
+        self.node_decorators[kind_id][n - 1]
+            .0
+            .decorate_node(&next, writer, source, arena, node_ref, entering, context)
+    }
+
+    fn render_node_undecorated<'a>(
         &self,
         writer: &mut W,
         source: &'a str,
@@ -1011,6 +1036,26 @@ impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RendererHelper<'r, W, 
     }
 }
 
+impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> RenderChain<W>
+    for RendererHelper<'r, W, B, O>
+{
+    fn render_decorated<'a>(
+        &self,
+        kind_id: usize,
+        n: usize,
+        writer: &mut W,
+        source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        context: &mut Context,
+    ) -> Result<WalkStatus> {
+        RendererHelper::render_decorated(
+            self, kind_id, n, writer, source, arena, node_ref, entering, context,
+        )
+    }
+}
+
 // }}} RendererHelper
 
 // BuiltinNodesRenderer {{{
@@ -1273,170 +1318,7 @@ pub trait BuiltinNodesRenderer<W> {
 
 // }}} BuiltinNodesRenderer
 
-// Hook & RenderNode {{{
-
-/// A trait for rendering a node.
-pub trait Render<W> {
-    fn render(
-        &self,
-        writer: &mut W,
-        source: &str,
-        arena: &Arena,
-        node_ref: NodeRef,
-        context: &mut Context,
-    ) -> Result<()>;
-}
-
-struct RenrererHelperRender<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> {
-    helper: &'r RendererHelper<'r, W, B, O>,
-}
-
-impl<'r, W, B: BuiltinNodesRenderer<W>, O: FormatOptions> Render<W>
-    for RenrererHelperRender<'r, W, B, O>
-{
-    fn render(
-        &self,
-        writer: &mut W,
-        source: &str,
-        arena: &Arena,
-        node_ref: NodeRef,
-        context: &mut Context,
-    ) -> Result<()> {
-        walk(arena, node_ref, &mut |arena: &Arena,
-                                    node_ref: NodeRef,
-                                    entering: bool|
-         -> Result<WalkStatus> {
-            self.helper
-                .render_node(writer, source, arena, node_ref, entering, context)
-        })
-        .map(|_| ())
-        .map_err(|e| match e {
-            CallbackError::Internal(err) => err,
-            CallbackError::Callback(err) => err,
-        })?;
-        Ok(())
-    }
-}
-
-/// A trait for pre-rendering nodes.
-pub trait PreRender<W> {
-    fn pre_render(
-        &self,
-        writer: &mut W,
-        source: &str,
-        arena: &Arena,
-        node_ref: NodeRef,
-        render: &dyn Render<W>,
-        context: &mut Context,
-    ) -> Result<()>;
-}
-
-impl<F, W> PreRender<W> for F
-where
-    F: Fn(&mut W, &str, &Arena, NodeRef, &dyn Render<W>, &mut Context) -> Result<()>,
-{
-    fn pre_render(
-        &self,
-        writer: &mut W,
-        source: &str,
-        arena: &Arena,
-        node_ref: NodeRef,
-        render: &dyn Render<W>,
-        context: &mut Context,
-    ) -> Result<()> {
-        (self)(writer, source, arena, node_ref, render, context)
-    }
-}
-
-/// A trait for post-rendering nodes.
-pub trait PostRender<W> {
-    fn post_render(
-        &self,
-        writer: &mut W,
-        source: &str,
-        arena: &Arena,
-        node_ref: NodeRef,
-        render: &dyn Render<W>,
-        context: &mut Context,
-    ) -> Result<()>;
-}
-
-impl<F, W> PostRender<W> for F
-where
-    F: Fn(&mut W, &str, &Arena, NodeRef, &dyn Render<W>, &mut Context) -> Result<()>,
-{
-    fn post_render(
-        &self,
-        writer: &mut W,
-        source: &str,
-        arena: &Arena,
-        node_ref: NodeRef,
-        render: &dyn Render<W>,
-        context: &mut Context,
-    ) -> Result<()> {
-        (self)(writer, source, arena, node_ref, render, context)
-    }
-}
-
-/// A boxed pre-render function.
-pub struct BoxPreRender<'r, W>(Box<dyn PreRender<W> + 'r>);
-
-impl<'r, W> BoxPreRender<'r, W> {
-    /// Creates a new `BoxPreRender` from a given function or closure.
-    pub fn new(pr: impl PreRender<W> + 'r) -> Self {
-        BoxPreRender(Box::new(pr))
-    }
-
-    #[inline(always)]
-    pub fn pre_render(
-        &self,
-        writer: &mut W,
-        source: &str,
-        arena: &Arena,
-        node_ref: NodeRef,
-        render: &dyn Render<W>,
-        context: &mut Context,
-    ) -> Result<()> {
-        self.0
-            .pre_render(writer, source, arena, node_ref, render, context)
-    }
-}
-
-impl<W> Debug for BoxPreRender<'_, W> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "BoxPreRender")
-    }
-}
-
-/// A boxed post-render function.
-pub struct BoxPostRender<'r, W>(Box<dyn PostRender<W> + 'r>);
-
-impl<'r, W> BoxPostRender<'r, W> {
-    /// Creates a new `BoxPostRender` from a given function or closure.
-    pub fn new(pr: impl PostRender<W> + 'r) -> Self {
-        BoxPostRender(Box::new(pr))
-    }
-
-    #[inline(always)]
-    pub fn post_render(
-        &self,
-        writer: &mut W,
-        source: &str,
-        arena: &Arena,
-        node_ref: NodeRef,
-        render: &dyn Render<W>,
-        context: &mut Context,
-    ) -> Result<()> {
-        self.0
-            .post_render(writer, source, arena, node_ref, render, context)
-    }
-}
-
-impl<W> Debug for BoxPostRender<'_, W> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "BoxPostRender")
-    }
-}
+// RenderNode {{{
 
 /// Traits for rendering nodes.
 pub trait RenderNode<W> {
@@ -1499,3 +1381,118 @@ impl<W> Debug for BoxRenderNode<'_, W> {
 }
 
 // }}} RenderNode
+
+// RenderNodeDecorator {{{
+
+trait RenderChain<W> {
+    #[allow(clippy::too_many_arguments)]
+    fn render_decorated<'a>(
+        &self,
+        kind_id: usize,
+        n: usize,
+        writer: &mut W,
+        source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        context: &mut Context,
+    ) -> Result<WalkStatus>;
+}
+
+/// The next renderer in a decoration chain.
+///
+/// Calling [`NextRenderNode::render_node`] calls the next inner decorator, or the node
+/// renderer (an overriding one or the builtin one) if there are no more decorators.
+pub struct NextRenderNode<'n, W> {
+    chain: &'n dyn RenderChain<W>,
+    kind_id: usize,
+    n: usize,
+}
+
+impl<W> NextRenderNode<'_, W> {
+    /// Renders the node with the next renderer.
+    #[inline]
+    pub fn render_node<'a>(
+        &self,
+        writer: &mut W,
+        source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        context: &mut Context,
+    ) -> Result<WalkStatus> {
+        self.chain.render_decorated(
+            self.kind_id,
+            self.n,
+            writer,
+            source,
+            arena,
+            node_ref,
+            entering,
+            context,
+        )
+    }
+}
+
+/// A decorator of a node renderer.
+///
+/// A decorator receives the next renderer and decides whether and how to call it,
+/// so it can add behaviors before and after the rendering, or replace the rendering.
+/// Closures are also decorators.
+pub trait RenderNodeDecorator<W> {
+    #[allow(clippy::too_many_arguments)]
+    fn decorate_node<'a>(
+        &self,
+        next: &NextRenderNode<'_, W>,
+        writer: &mut W,
+        source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        context: &mut Context,
+    ) -> Result<WalkStatus>;
+}
+
+impl<F, W> RenderNodeDecorator<W> for F
+where
+    F: for<'a> Fn(
+        &NextRenderNode<'_, W>,
+        &mut W,
+        &'a str,
+        &'a Arena,
+        NodeRef,
+        bool,
+        &mut Context,
+    ) -> Result<WalkStatus>,
+{
+    fn decorate_node<'a>(
+        &self,
+        next: &NextRenderNode<'_, W>,
+        writer: &mut W,
+        source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        context: &mut Context,
+    ) -> Result<WalkStatus> {
+        (self)(next, writer, source, arena, node_ref, entering, context)
+    }
+}
+
+/// A boxed [`RenderNodeDecorator`].
+pub struct BoxRenderNodeDecorator<'r, W>(Box<dyn RenderNodeDecorator<W> + 'r>);
+
+impl<'r, W> BoxRenderNodeDecorator<'r, W> {
+    /// Creates a new `BoxRenderNodeDecorator` from a given decorator, function or closure.
+    pub fn new(decorator: impl RenderNodeDecorator<W> + 'r) -> Self {
+        BoxRenderNodeDecorator(Box::new(decorator))
+    }
+}
+
+impl<W> Debug for BoxRenderNodeDecorator<'_, W> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "BoxRenderNodeDecorator")
+    }
+}
+
+// }}} RenderNodeDecorator

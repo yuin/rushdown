@@ -436,12 +436,12 @@ impl Default for HeaderFooterHtmlRendererOptions {
     }
 }
 
-struct HeaderPreRenderHook<W: TextWrite> {
+struct HeaderFooterDecorator<W: TextWrite> {
     _phantom: core::marker::PhantomData<W>,
     options: HeaderFooterHtmlRendererOptions,
 }
 
-impl<W: TextWrite> HeaderPreRenderHook<W> {
+impl<W: TextWrite> HeaderFooterDecorator<W> {
     fn with_options(options: HeaderFooterHtmlRendererOptions) -> Self {
         Self {
             _phantom: core::marker::PhantomData,
@@ -450,47 +450,29 @@ impl<W: TextWrite> HeaderPreRenderHook<W> {
     }
 }
 
-impl<W: TextWrite> PreRender<W> for HeaderPreRenderHook<W> {
-    fn pre_render(
-        &self,
-        w: &mut W,
-        _source: &str,
-        _arena: &Arena,
-        _node_ref: NodeRef,
-        _render: &dyn Render<W>,
-        _context: &mut renderer::Context,
-    ) -> Result<()> {
-        html::write_html(w, self.options.header.as_str())?;
-        Ok(())
-    }
-}
-
-struct FooterPostRenderHook<W: TextWrite> {
-    _phantom: core::marker::PhantomData<W>,
-    options: HeaderFooterHtmlRendererOptions,
-}
-
-impl<W: TextWrite> FooterPostRenderHook<W> {
-    fn with_options(options: HeaderFooterHtmlRendererOptions) -> Self {
-        Self {
-            _phantom: core::marker::PhantomData,
-            options,
-        }
-    }
-}
-
-impl<W: TextWrite> PostRender<W> for FooterPostRenderHook<W> {
-    fn post_render(
-        &self,
-        w: &mut W,
-        _source: &str,
-        _arena: &Arena,
-        _node_ref: NodeRef,
-        _render: &dyn Render<W>,
-        _context: &mut renderer::Context,
-    ) -> Result<()> {
-        html::write_html(w, self.options.footer.as_str())?;
-        Ok(())
+impl<'cb, W: TextWrite + 'cb> NodeRenderer<'cb, W> for HeaderFooterDecorator<W> {
+    fn register_node_renderer_fn(self, nrr: &mut impl NodeRendererRegistry<'cb, W>) {
+        nrr.register_node_renderer_decorator_fn(
+            TypeId::of::<Document>(),
+            BoxRenderNodeDecorator::new(
+                move |next: &NextRenderNode<'_, W>,
+                      w: &mut W,
+                      source: &str,
+                      arena: &Arena,
+                      node_ref: NodeRef,
+                      entering: bool,
+                      context: &mut renderer::Context| {
+                    if entering {
+                        html::write_html(w, self.options.header.as_str())?;
+                    }
+                    let status = next.render_node(w, source, arena, node_ref, entering, context)?;
+                    if !entering {
+                        html::write_html(w, self.options.footer.as_str())?;
+                    }
+                    Ok(status)
+                },
+            ),
+        );
     }
 }
 
@@ -501,13 +483,7 @@ where
     W: TextWrite + 'cb,
 {
     renderer_extension(|r| {
-        let options = options.into();
-        r.add_pre_render_hook(HeaderPreRenderHook::with_options, options.clone(), 0);
-        r.add_post_render_hook(
-            FooterPostRenderHook::with_options,
-            options.clone(),
-            u32::MAX,
-        );
+        r.add_node_renderer(HeaderFooterDecorator::with_options, options.into());
     })
 }
 
