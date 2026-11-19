@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/renderer/html"
+	"github.com/yuin/goldmark/v2/parser"
+	"github.com/yuin/goldmark/v2/renderer/html"
 )
 
 func main() {
@@ -24,15 +24,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	markdown := goldmark.New(goldmark.WithRendererOptions(html.WithXHTML(), html.WithUnsafe()))
+	p := parser.New()
+	r := html.New(html.WithXHTML(), html.WithUnsafe())
 	var out bytes.Buffer
-	markdown.Convert([]byte(""), &out)
 
 	sum := time.Duration(0)
 	for i := 0; i < n; i++ {
 		start := time.Now()
 		out.Reset()
-		if err := markdown.Convert(source, &out); err != nil {
+		doc := p.Parse(source)
+		if err := r.Render(&out, source, doc); err != nil {
 			panic(err)
 		}
 		sum += time.Since(start)

@@ -1,5 +1,5 @@
 module main
 
-go 1.24.2
+go 1.25
 
-require github.com/yuin/goldmark v1.7.16
+require github.com/yuin/goldmark/v2 v2.1.16
