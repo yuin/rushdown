@@ -193,3 +193,145 @@ fn test_parse_delimiter_simple() {
     );
     suite.execute(&markdown_to_html)
 }
+
+#[test]
+fn test_line_break_strategy_simple_east_asian() {
+    let path = data_path("line-break-strategy-simple.txt");
+    let s = fs::read_to_string(&path).expect("failed to read line-break-strategy-simple.txt");
+    let suite = MarkdownTestSuite::with_str(s.as_str()).unwrap();
+    let markdown_to_html = new_markdown_to_html(
+        parser::Options {
+            escaped_space: true,
+            ..Default::default()
+        },
+        html::Options {
+            allows_unsafe: true,
+            xhtml: true,
+            line_break_strategy: Some(html::LineBreakStrategy::SimpleEastAsian),
+            ..html::Options::default()
+        },
+        parser::NO_EXTENSIONS,
+        html::NO_EXTENSIONS,
+    );
+    suite.execute(&markdown_to_html)
+}
+
+#[test]
+fn test_line_break_strategy_css_text3() {
+    let path = data_path("line-break-strategy-css-text3.txt");
+    let s = fs::read_to_string(&path).expect("failed to read line-break-strategy-css-text3.txt");
+    let suite = MarkdownTestSuite::with_str(s.as_str()).unwrap();
+    let markdown_to_html = new_markdown_to_html(
+        parser::Options::default(),
+        html::Options {
+            xhtml: true,
+            line_break_strategy: Some(html::LineBreakStrategy::CssText3),
+            ..html::Options::default()
+        },
+        parser::NO_EXTENSIONS,
+        html::NO_EXTENSIONS,
+    );
+    suite.execute(&markdown_to_html)
+}
+
+#[test]
+fn test_hard_wraps_take_precedence_over_line_break_strategy() {
+    let markdown_to_html = new_markdown_to_html(
+        parser::Options::default(),
+        html::Options {
+            xhtml: true,
+            hard_wraps: true,
+            line_break_strategy: Some(html::LineBreakStrategy::SimpleEastAsian),
+            ..html::Options::default()
+        },
+        parser::NO_EXTENSIONS,
+        html::NO_EXTENSIONS,
+    );
+    let mut out = String::new();
+    markdown_to_html(&mut out, "言った\nんです").unwrap();
+    assert_eq!(out, "<p>言った<br />\nんです</p>\n");
+}
+
+#[test]
+fn test_custom_line_break_strategy() {
+    fn never_break(_last: Option<char>, _first: Option<char>) -> bool {
+        false
+    }
+    let markdown_to_html = new_markdown_to_html(
+        parser::Options::default(),
+        html::Options {
+            line_break_strategy: Some(html::LineBreakStrategy::Custom(never_break)),
+            ..html::Options::default()
+        },
+        parser::NO_EXTENSIONS,
+        html::NO_EXTENSIONS,
+    );
+    let mut out = String::new();
+    markdown_to_html(&mut out, "a\nb").unwrap();
+    assert_eq!(out, "<p>ab</p>\n");
+}
+
+#[derive(Debug)]
+struct Mention;
+
+impl rushdown::ast::NodeKind for Mention {
+    fn typ(&self) -> rushdown::ast::NodeType {
+        rushdown::ast::NodeType::Inline
+    }
+    fn kind_name(&self) -> &'static str {
+        "Mention"
+    }
+}
+
+impl rushdown::ast::InlineChars for Mention {
+    fn first_char(
+        &self,
+        _node: &rushdown::ast::Node,
+        _arena: &rushdown::ast::Arena,
+        _source: &str,
+    ) -> Option<char> {
+        Some('@')
+    }
+}
+
+impl rushdown::ast::PrettyPrint for Mention {
+    fn pretty_print(
+        &self,
+        _w: &mut dyn core::fmt::Write,
+        _s: &str,
+        _l: usize,
+    ) -> core::fmt::Result {
+        Ok(())
+    }
+}
+
+impl From<Mention> for rushdown::ast::KindData {
+    fn from(e: Mention) -> Self {
+        rushdown::ast::KindData::Extension(Box::new(e))
+    }
+}
+
+#[test]
+fn test_extension_first_and_last_char() {
+    use rushdown::ast::{Arena, Text};
+    let mut arena = Arena::new();
+    let m = arena.new_node(Mention);
+    let t = arena.new_node(Text::new(rushdown::text::Value::from_string(
+        "ab",
+        rushdown::text::Decoder::Identity,
+    )));
+    m.append_child(&mut arena, t);
+    // overridden first_char, default last_char descends into children
+    assert_eq!(arena[m].first_char(&arena, ""), Some('@'));
+    assert_eq!(arena[m].last_char(&arena, ""), Some('b'));
+
+    // block nodes do not have inline characters
+    let p = arena.new_node(rushdown::ast::Paragraph::new());
+    let t = arena.new_node(Text::new(rushdown::text::Value::from_string(
+        "ab",
+        rushdown::text::Decoder::Identity,
+    )));
+    p.append_child(&mut arena, t);
+    assert_eq!(arena[p].first_char(&arena, ""), None);
+    assert_eq!(arena[p].last_char(&arena, ""), None);
+}

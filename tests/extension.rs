@@ -56,6 +56,8 @@ impl PrettyPrint for UserMention {
     }
 }
 
+impl InlineChars for UserMention {}
+
 impl From<UserMention> for KindData {
     fn from(e: UserMention) -> Self {
         KindData::Extension(Box::new(e))
@@ -233,6 +235,8 @@ impl PrettyPrint for Admonition {
         )
     }
 }
+
+impl InlineChars for Admonition {}
 
 impl From<Admonition> for KindData {
     fn from(e: Admonition) -> Self {

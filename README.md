@@ -235,9 +235,10 @@ heading {#id .className attrName=attrValue}
 
 | Option | Default value | Description |
 | --- | --- | --- |
-| `hard_wrap` | `false` | Renders soft line breaks as hard line breaks (`<br />`). |
+| `hard_wraps` | `false` | Renders soft line breaks as hard line breaks (`<br />`). |
 | `xhtml` | `false` | Whether to render HTML in XHTML style. |
 | `allows_unsafe` | `false` | Whether to allow rendering raw HTML and potentially-dangerous URLs. |
+| `line_break_strategy` | `None` | A strategy that decides whether soft line breaks are rendered as newlines. `hard_wraps` takes precedence. |
 | `attribute_filters` | default filters | A list of filters for rendering attributes as HTML tag attributes. |
 
 #### Customize Task list item rendering

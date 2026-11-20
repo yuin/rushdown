@@ -879,6 +879,44 @@ impl KindData {
         }
     }
 
+    /// Returns the first visible character of this node data.
+    /// Returns [`None`] for block nodes.
+    pub fn first_char(&self, node: &Node, arena: &Arena, source: &str) -> Option<char> {
+        match self {
+            KindData::Text(n) => n.first_char(node, arena, source),
+            KindData::CodeSpan(n) => n.first_char(node, arena, source),
+            KindData::Emphasis(n) => n.first_char(node, arena, source),
+            KindData::Strong(n) => n.first_char(node, arena, source),
+            KindData::Link(n) => n.first_char(node, arena, source),
+            KindData::Image(n) => n.first_char(node, arena, source),
+            KindData::RawHtml(n) => n.first_char(node, arena, source),
+            KindData::Strikethrough(n) => n.first_char(node, arena, source),
+            KindData::Extension(n) if n.typ() == NodeType::Inline => {
+                n.first_char(node, arena, source)
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns the last visible character of this node data.
+    /// Returns [`None`] for block nodes.
+    pub fn last_char(&self, node: &Node, arena: &Arena, source: &str) -> Option<char> {
+        match self {
+            KindData::Text(n) => n.last_char(node, arena, source),
+            KindData::CodeSpan(n) => n.last_char(node, arena, source),
+            KindData::Emphasis(n) => n.last_char(node, arena, source),
+            KindData::Strong(n) => n.last_char(node, arena, source),
+            KindData::Link(n) => n.last_char(node, arena, source),
+            KindData::Image(n) => n.last_char(node, arena, source),
+            KindData::RawHtml(n) => n.last_char(node, arena, source),
+            KindData::Strikethrough(n) => n.last_char(node, arena, source),
+            KindData::Extension(n) if n.typ() == NodeType::Inline => {
+                n.last_char(node, arena, source)
+            }
+            _ => None,
+        }
+    }
+
     /// Pretty prints the node data.
     pub fn pretty_print(&self, w: &mut dyn Write, source: &str, level: usize) -> fmt::Result {
         match self {
@@ -1200,6 +1238,33 @@ impl Node {
         NodesMut::with_vec(self.children(arena).collect())
     }
 
+    /// Returns the first visible character of this node, if any.
+    /// Returns [`None`] for block nodes.
+    /// See [`InlineChars`] for how each inline node kind determines its character.
+    pub fn first_char(&self, arena: &Arena, source: &str) -> Option<char> {
+        self.kind_data.first_char(self, arena, source)
+    }
+
+    /// Returns the last visible character of this node, if any.
+    /// Returns [`None`] for block nodes.
+    /// See [`InlineChars`] for how each inline node kind determines its character.
+    pub fn last_char(&self, arena: &Arena, source: &str) -> Option<char> {
+        self.kind_data.last_char(self, arena, source)
+    }
+
+    /// Returns the first character found in the children of this node.
+    pub fn first_char_of_children(&self, arena: &Arena, source: &str) -> Option<char> {
+        self.children(arena)
+            .find_map(|c| arena[c].first_char(arena, source))
+    }
+
+    /// Returns the last character found in the children of this node.
+    pub fn last_char_of_children(&self, arena: &Arena, source: &str) -> Option<char> {
+        self.children(arena)
+            .rev()
+            .find_map(|c| arena[c].last_char(arena, source))
+    }
+
     /// Returns the attributes of the node.
     #[inline(always)]
     pub fn attributes(&self) -> &Attributes {
@@ -1310,7 +1375,32 @@ impl DoubleEndedIterator for NodesMut {
     }
 }
 
-/// Trait for pretty printing nodes.
+/// Provides the visible characters at the boundaries of an inline node.
+/// These characters are used by line break strategies to decide whether a soft line
+/// break should be rendered.
+///
+/// Implementors receive the [`Node`] that holds this data so the default implementations
+/// can descend into its children. Text and code spans use their decoded values, and raw
+/// HTML is treated as `<` and `>`. All other inline nodes use the first or last character
+/// found in their descendants.
+///
+/// This trait is a supertrait of [`ExtensionData`] because extensions can add inline
+/// nodes. Block extensions can use the default implementations.
+pub trait InlineChars {
+    /// Returns the first visible character of `node`, which has this data.
+    /// The default implementation uses the first descendant that has a character.
+    fn first_char(&self, node: &Node, arena: &Arena, source: &str) -> Option<char> {
+        node.first_char_of_children(arena, source)
+    }
+
+    /// Returns the last visible character of `node`, which has this data.
+    /// The default implementation uses the last descendant that has a character.
+    fn last_char(&self, node: &Node, arena: &Arena, source: &str) -> Option<char> {
+        node.last_char_of_children(arena, source)
+    }
+}
+
+/// A trait for pretty printing node data.
 pub trait PrettyPrint {
     /// Pretty prints the node data.
     fn pretty_print(&self, w: &mut dyn Write, source: &str, level: usize) -> fmt::Result;
@@ -2612,6 +2702,16 @@ impl PrettyPrint for Text {
     }
 }
 
+impl InlineChars for Text {
+    fn first_char(&self, _node: &Node, _arena: &Arena, source: &str) -> Option<char> {
+        self.value().value(source).chars().next()
+    }
+
+    fn last_char(&self, _node: &Node, _arena: &Arena, source: &str) -> Option<char> {
+        self.value().value(source).chars().next_back()
+    }
+}
+
 impl From<Text> for KindData {
     fn from(data: Text) -> Self {
         KindData::Text(data)
@@ -2681,6 +2781,16 @@ impl PrettyPrint for CodeSpan {
     }
 }
 
+impl InlineChars for CodeSpan {
+    fn first_char(&self, _node: &Node, _arena: &Arena, source: &str) -> Option<char> {
+        self.value().value(source).chars().next()
+    }
+
+    fn last_char(&self, _node: &Node, _arena: &Arena, source: &str) -> Option<char> {
+        self.value().value(source).chars().next_back()
+    }
+}
+
 impl From<CodeSpan> for KindData {
     fn from(data: CodeSpan) -> Self {
         KindData::CodeSpan(data)
@@ -2718,6 +2828,8 @@ impl PrettyPrint for Emphasis {
     }
 }
 
+impl InlineChars for Emphasis {}
+
 impl From<Emphasis> for KindData {
     fn from(data: Emphasis) -> Self {
         KindData::Emphasis(data)
@@ -2754,6 +2866,8 @@ impl PrettyPrint for Strong {
         Ok(())
     }
 }
+
+impl InlineChars for Strong {}
 
 impl From<Strong> for KindData {
     fn from(data: Strong) -> Self {
@@ -2963,6 +3077,8 @@ impl PrettyPrint for Link {
     }
 }
 
+impl InlineChars for Link {}
+
 impl From<Link> for KindData {
     fn from(data: Link) -> Self {
         KindData::Link(data)
@@ -3090,6 +3206,8 @@ impl PrettyPrint for Image {
     }
 }
 
+impl InlineChars for Image {}
+
 impl From<Image> for KindData {
     fn from(data: Image) -> Self {
         KindData::Image(data)
@@ -3146,6 +3264,16 @@ impl PrettyPrint for RawHtml {
     }
 }
 
+impl InlineChars for RawHtml {
+    fn first_char(&self, _node: &Node, _arena: &Arena, _source: &str) -> Option<char> {
+        Some('<')
+    }
+
+    fn last_char(&self, _node: &Node, _arena: &Arena, _source: &str) -> Option<char> {
+        Some('>')
+    }
+}
+
 impl From<RawHtml> for KindData {
     fn from(data: RawHtml) -> Self {
         KindData::RawHtml(data)
@@ -3183,6 +3311,8 @@ impl PrettyPrint for Strikethrough {
     }
 }
 
+impl InlineChars for Strikethrough {}
+
 impl From<Strikethrough> for KindData {
     fn from(e: Strikethrough) -> Self {
         KindData::Strikethrough(e)
@@ -3195,11 +3325,11 @@ impl From<Strikethrough> for KindData {
 // ExtensionData {{{
 
 /// A composite trait for nodes will be added from outside of this library.
-pub trait ExtensionData: Debug + PrettyPrint + NodeKind + Any {
+pub trait ExtensionData: Debug + PrettyPrint + InlineChars + NodeKind + Any {
     fn as_any(&self) -> &dyn Any;
 }
 
-impl<T: PrettyPrint + NodeKind + Debug + Any> ExtensionData for T {
+impl<T: PrettyPrint + InlineChars + NodeKind + Debug + Any> ExtensionData for T {
     fn as_any(&self) -> &dyn Any {
         self
     }

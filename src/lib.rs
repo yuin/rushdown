@@ -179,7 +179,7 @@ macro_rules! matches_kind {
 /// # Examples
 /// ```
 /// use core::fmt::{self, Write};
-/// use rushdown::ast::{Arena, NodeRef, NodeType, NodeKind, KindData, PrettyPrint, pp_indent};
+/// use rushdown::ast::{Arena, NodeRef, NodeType, NodeKind, KindData, InlineChars, PrettyPrint, pp_indent};
 /// use rushdown::matches_extension_kind;
 ///
 /// #[derive(Debug)]
@@ -198,6 +198,8 @@ macro_rules! matches_kind {
 ///         writeln!(w, "{}kind: {}", pp_indent(level), self.kind)
 ///     }
 /// }
+///
+/// impl InlineChars for Admonition {}
 ///
 /// impl From<Admonition> for KindData {
 ///     fn from(e: Admonition) -> Self { KindData::Extension(Box::new(e)) }
@@ -236,7 +238,7 @@ macro_rules! matches_extension_kind {
 /// # Examples
 /// ```
 /// use core::fmt::{self, Write};
-/// use rushdown::ast::{Arena, NodeRef, NodeType, NodeKind, KindData, PrettyPrint, pp_indent};
+/// use rushdown::ast::{Arena, NodeRef, NodeType, NodeKind, KindData, InlineChars, PrettyPrint, pp_indent};
 /// use rushdown::as_extension_data;
 ///
 /// #[derive(Debug)]
@@ -255,6 +257,8 @@ macro_rules! matches_extension_kind {
 ///         writeln!(w, "{}kind: {}", pp_indent(level), self.kind)
 ///     }
 /// }
+///
+/// impl InlineChars for Admonition {}
 ///
 /// impl From<Admonition> for KindData {
 ///     fn from(e: Admonition) -> Self { KindData::Extension(Box::new(e)) }

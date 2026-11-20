@@ -10,6 +10,9 @@ use core::{
     ops::{Deref, DerefMut, Index, IndexMut},
 };
 
+mod cjk;
+pub use cjk::*;
+
 #[allow(unused_imports)]
 #[cfg(all(not(feature = "std"), feature = "no-std-unix-debug"))]
 use crate::println;

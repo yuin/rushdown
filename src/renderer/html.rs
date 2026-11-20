@@ -10,7 +10,7 @@ use crate::{
     error::Error,
     matches_kind,
     renderer::{self, BuiltinNodesRenderer as _, *},
-    util::{escape_html, escape_url, try_escape_html_byte, AsciiWordSet, EscapeUrlOptions},
+    util::{self, escape_html, escape_url, try_escape_html_byte, AsciiWordSet, EscapeUrlOptions},
 };
 
 // FormatOptions {{{
@@ -27,6 +27,11 @@ pub struct Options {
     /// Allows raw HTML and unsafe links.
     pub allows_unsafe: bool,
 
+    /// A strategy that decides whether soft line breaks are rendered as newlines.
+    /// If [`None`], soft line breaks are always rendered as newlines.
+    /// `hard_wraps` takes precedence over this option.
+    pub line_break_strategy: Option<LineBreakStrategy>,
+
     /// Attribute filters for rendering.
     pub attribute_filters: Option<Rc<AttributeFilters>>,
 
@@ -40,6 +45,7 @@ impl core::fmt::Debug for Options {
             .field("hard_wraps", &self.hard_wraps)
             .field("xhtml", &self.xhtml)
             .field("allows_unsafe", &self.allows_unsafe)
+            .field("line_break_strategy", &self.line_break_strategy)
             .field("attribute_filters", &self.attribute_filters)
             .field(
                 "context_key_registry_initializer",
@@ -56,6 +62,7 @@ impl Default for Options {
             hard_wraps: false,
             xhtml: false,
             allows_unsafe: false,
+            line_break_strategy: None,
             attribute_filters: Some(Rc::new(AttributeFilters::default())),
             context_key_registry_initializer: None,
         }
@@ -71,6 +78,70 @@ impl<T: RendererOptions> FromRendererConstructorOptions<Options, T> for Options 
 }
 
 // }}} FormatOptions
+
+// LineBreakStrategy {{{
+
+/// A function that decides whether a soft line break between two characters is rendered
+/// as a newline. Arguments are the last character before and the first character after
+/// the soft line break; [`None`] means that no such character exists.
+pub type SoftLineBreakFn = fn(last: Option<char>, first: Option<char>) -> bool;
+
+/// Strategies that decide whether a soft line break is rendered as a newline.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub enum LineBreakStrategy {
+    /// Ignores soft line breaks if both neighbors are East Asian wide characters.
+    SimpleEastAsian,
+    /// Follows CSS Text Module Level 3 with some enhancements for CJK.
+    CssText3,
+    /// A user defined strategy.
+    Custom(SoftLineBreakFn),
+}
+
+impl LineBreakStrategy {
+    /// Returns true if a soft line break between `last` and `first` should be
+    /// rendered as a newline.
+    pub fn soft_line_break(&self, last: Option<char>, first: Option<char>) -> bool {
+        match self {
+            LineBreakStrategy::SimpleEastAsian => {
+                !last.is_some_and(util::is_east_asian_wide_char)
+                    || !first.is_some_and(util::is_east_asian_wide_char)
+            }
+            LineBreakStrategy::CssText3 => css_text3_soft_line_break(last, first),
+            LineBreakStrategy::Custom(f) => f(last, first),
+        }
+    }
+}
+
+// See https://www.w3.org/TR/2020/WD-css-text-3-20200429/#line-break-transform and
+// https://github.com/w3c/csswg-drafts/issues/5086
+fn css_text3_soft_line_break(last: Option<char>, first: Option<char>) -> bool {
+    // Rule1: a zero-width space next to the break removes the break.
+    if last == Some('\u{200B}') || first == Some('\u{200B}') {
+        return false;
+    }
+
+    // Rule2: if both neighbors are F, W or H and neither is Hangul, the break is removed.
+    let is_fwh = |c: Option<char>| {
+        c.is_some_and(|c| util::east_asian_width(c) != util::EastAsianWidth::Other)
+    };
+    if is_fwh(last) && is_fwh(first) {
+        return last.is_some_and(util::is_hangul_char) || first.is_some_and(util::is_hangul_char);
+    }
+
+    // Rule3: a space-discarding character or U+3000 next to the break removes the break.
+    let discards = |c: Option<char>| {
+        c.is_some_and(|c| c == '\u{3000}' || util::is_space_discarding_unicode_char(c))
+    };
+    if discards(last) || discards(first) {
+        return false;
+    }
+
+    // Rule4: the break is converted to a space.
+    true
+}
+
+// }}} LineBreakStrategy
 
 // AttributeFilters {{{
 
@@ -648,7 +719,23 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
                     w.write_str("<br>\n")?;
                 }
             } else if kd.has_qualifiers(TextQualifier::SOFT_LINE_BREAK) {
-                w.write_char('\n')?;
+                match &self.format_options.line_break_strategy {
+                    None => w.write_char('\n')?,
+                    Some(strategy) => {
+                        let sv = kd.value().value(source);
+                        let trimmed =
+                            sv.trim_end_matches(|c: char| c.is_ascii() && util::is_space(c as u8));
+                        let mut last = trimmed.chars().next_back();
+                        if last.is_none() {
+                            last = last_char_of_siblings(arena, node_ref, source);
+                        }
+                        let first =
+                            first_char_of_siblings(arena, arena[node_ref].next_sibling(), source);
+                        if strategy.soft_line_break(last, first) {
+                            w.write_char('\n')?;
+                        }
+                    }
+                }
             }
         }
         Ok(WalkStatus::Continue)
@@ -825,6 +912,38 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
 }
 
 // }}} BuiltinNodesRenderer
+
+fn last_char_of_siblings(arena: &ast::Arena, node_ref: ast::NodeRef, source: &str) -> Option<char> {
+    let mut cur = Some(node_ref);
+    while let Some(c) = cur {
+        if arena[c].kind_data().typ() != ast::NodeType::Inline {
+            break;
+        }
+        if let Some(ch) = arena[c].last_char(arena, source) {
+            return Some(ch);
+        }
+        cur = arena[c].previous_sibling();
+    }
+    None
+}
+
+fn first_char_of_siblings(
+    arena: &ast::Arena,
+    start: Option<ast::NodeRef>,
+    source: &str,
+) -> Option<char> {
+    let mut cur = start;
+    while let Some(c) = cur {
+        if arena[c].kind_data().typ() != ast::NodeType::Inline {
+            break;
+        }
+        if let Some(ch) = arena[c].first_char(arena, source) {
+            return Some(ch);
+        }
+        cur = arena[c].next_sibling();
+    }
+    None
+}
 
 // Renderer {{{
 
