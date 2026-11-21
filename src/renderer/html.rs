@@ -5,6 +5,8 @@ extern crate alloc;
 
 use alloc::string::{String, ToString};
 
+use memchr::memchr;
+
 use crate::{
     as_kind_data,
     error::Error,
@@ -1152,16 +1154,22 @@ impl<W: TextWrite + ?Sized> TextWrite for HtmlWriter<'_, W> {
 /// decodes and encodes the value in a single pass.
 pub struct TextWriter<'w, W: TextWrite + ?Sized>(&'w mut W);
 
+/// Bytes that need HTML escaping. Keep this in sync with
+/// [`try_escape_html_byte`].
+const HTML_ESCAPED_BYTES: [u8; 5] = [0x00, b'"', b'&', b'<', b'>'];
+
+/// Below this length, scanning byte by byte is cheaper than setting up the
+/// jump-table search.
+const TEXT_WRITER_JUMP_THRESHOLD: usize = 32;
+
 impl<'w, W: TextWrite + ?Sized> TextWriter<'w, W> {
     /// Creates a new [`TextWriter`] that writes to `w`.
     #[inline(always)]
     pub fn new(w: &'w mut W) -> Self {
         Self(w)
     }
-}
 
-impl<W: TextWrite + ?Sized> TextWrite for TextWriter<'_, W> {
-    fn write_str(&mut self, s: &str) -> Result<()> {
+    fn write_short(&mut self, s: &str) -> Result<()> {
         let bytes = s.as_bytes();
         let mut n = 0;
         for (i, &b) in bytes.iter().enumerate() {
@@ -1174,6 +1182,56 @@ impl<W: TextWrite + ?Sized> TextWrite for TextWriter<'_, W> {
             }
         }
         if n != bytes.len() {
+            self.0.write_str(&s[n..])?;
+        }
+        Ok(())
+    }
+}
+
+impl<W: TextWrite + ?Sized> TextWrite for TextWriter<'_, W> {
+    fn write_str(&mut self, s: &str) -> Result<()> {
+        let bytes = s.as_bytes();
+        if bytes.len() < TEXT_WRITER_JUMP_THRESHOLD {
+            return self.write_short(s);
+        }
+
+        // Find the first occurrence of each escapable byte, then jump between
+        // them instead of examining every byte. Positions are refreshed only
+        // for the bytes we have just consumed, so this stays linear even for
+        // a long run of escapes.
+        let mut positions = [None; 5];
+        for (i, &c) in HTML_ESCAPED_BYTES.iter().enumerate() {
+            positions[i] = memchr(c, bytes);
+        }
+        if positions.iter().all(|p| p.is_none()) {
+            return self.0.write_str(s);
+        }
+
+        let mut n = 0;
+        loop {
+            let mut next: Option<usize> = None;
+            for p in positions.into_iter().flatten() {
+                if next.is_none_or(|m| p < m) {
+                    next = Some(p);
+                }
+            }
+            let Some(i) = next else {
+                break;
+            };
+            if i > n {
+                self.0.write_str(&s[n..i])?;
+            }
+            if let Some(rep) = try_escape_html_byte(bytes[i]) {
+                self.0.write_str(rep)?;
+            }
+            n = i + 1;
+            for (k, pos) in positions.iter_mut().enumerate() {
+                if pos.is_some_and(|p| p < n) {
+                    *pos = memchr(HTML_ESCAPED_BYTES[k], &bytes[n..]).map(|p| n + p);
+                }
+            }
+        }
+        if n < bytes.len() {
             self.0.write_str(&s[n..])?;
         }
         Ok(())
