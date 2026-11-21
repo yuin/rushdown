@@ -4,7 +4,6 @@ use alloc::string::String;
 use crate::{
     as_kind_data,
     ast::{Arena, Image, Link, LinkReferenceKind, NodeRef, Text, TextQualifier},
-    matches_kind,
     parser::{
         process_delimiters, Context, InlineParser, LinkLabel, ParseStackElemData, ParseStackElemRef,
     },
@@ -13,6 +12,8 @@ use crate::{
 };
 
 const MAX_LINK_DESTINATION_NEST: usize = 32;
+
+const SIMPLE_LINK_MAX: usize = 512;
 
 /// [`InlineParser`] for links.
 #[derive(Debug, Default)]
@@ -40,6 +41,10 @@ impl InlineParser for LinkParser {
         let (line, segment) = reader.peek_line_bytes()?;
         if line.first() == Some(&b'!') {
             if line.get(1) == Some(&b'[') {
+                if let Some(node_ref) = parse_simple_link(arena, reader, &line, segment, true, ctx)
+                {
+                    return Some(node_ref);
+                }
                 reader.advance(1);
                 ctx.push_link_bottom();
                 return process_link_label_open(
@@ -54,6 +59,9 @@ impl InlineParser for LinkParser {
             return None;
         }
         if line.first() == Some(&b'[') {
+            if let Some(node_ref) = parse_simple_link(arena, reader, &line, segment, false, ctx) {
+                return Some(node_ref);
+            }
             ctx.push_link_bottom();
             return process_link_label_open(arena, reader, parent_ref, segment.start(), false, ctx);
         }
@@ -72,10 +80,10 @@ impl InlineParser for LinkParser {
         }
         let is_image = ctx.link_labels().data(last_link_label_ref).is_image();
         if !is_image
-            && contains_link(
-                arena,
-                Some(ctx.link_labels().elem(last_link_label_ref).node_ref()),
-            )
+            && ctx
+                .link_labels()
+                .data(last_link_label_ref)
+                .has_link_descendant()
         {
             remove_link_label(arena, last_link_label_ref, false, ctx);
             ctx.link_bottoms_mut().remove_top(arena);
@@ -250,6 +258,12 @@ fn process_link_label(
         link_ref.append_child(arena, c);
         c_opt = next;
     }
+    // CommonMark disallows links inside link text. Propagate the descendant
+    // marker so any still-open outer `[...]` opener turns into literal text
+    // when its closer is reached. Images inside links are allowed.
+    if !ctx.link_labels().data(last_ref).is_image() {
+        ctx.set_has_link_descendant();
+    }
 }
 
 fn parse_link(reader: &mut text::BlockReader) -> Option<Link> {
@@ -392,18 +406,189 @@ pub(super) fn parse_link_destination(reader: &mut text::BlockReader) -> Option<t
     ))
 }
 
-fn contains_link(arena: &Arena, node_ref: Option<NodeRef>) -> bool {
-    let mut node_ref_opt = node_ref;
-    while let Some(nref) = node_ref_opt {
-        if matches_kind!(arena, nref, Link) {
-            return true;
-        }
-        if contains_link(arena, arena[nref].first_child()) {
-            return true;
-        }
-        node_ref_opt = arena[nref].next_sibling();
+fn parse_simple_link(
+    arena: &mut Arena,
+    reader: &mut text::BlockReader,
+    line: &[u8],
+    segment: Segment,
+    is_image: bool,
+    ctx: &mut Context,
+) -> Option<NodeRef> {
+    let content_start = if is_image { 2 } else { 1 };
+    if content_start >= line.len() || line.len() > SIMPLE_LINK_MAX {
+        return None;
     }
-    false
+
+    let triggerable = ctx.simple_link_triggerable();
+    let mut close_bracket = None;
+    let mut i = content_start;
+    while i < line.len() {
+        let ch = line[i];
+        if ch == b'\\' && i + 1 < line.len() {
+            // An escaped byte is plain content, not syntax.
+            i += 2;
+            continue;
+        }
+        if ch == b'\n' || ch == b'[' {
+            return None;
+        }
+        if ch == b']' {
+            close_bracket = Some(i);
+            break;
+        }
+        if triggerable[ch as usize] {
+            return None;
+        }
+        i += 1;
+    }
+    let close_bracket = close_bracket?;
+    // The index of the label content, i.e. between `[` and `]`.
+    let label_segment = Segment::new(
+        segment.start() + content_start,
+        segment.start() + close_bracket,
+    );
+
+    // Commit the reader past `[label]` and delegate the tail to the shared
+    // helpers. Anything that fails there rewinds and lets the standard
+    // `[...]` state machine take another swing.
+    let (saved_line, saved_pos) = reader.position();
+    reader.advance(close_bracket + 1);
+    let link = match reader.peek_byte() {
+        b'(' => parse_link(reader),
+        b'[' => parse_reference_link_tail(arena, reader, label_segment, ctx),
+        _ => parse_shortcut_link_tail(arena, reader, label_segment, ctx),
+    };
+    let Some(link) = link else {
+        reader.set_position(saved_line, saved_pos);
+        return None;
+    };
+
+    let label_text_ref = arena.new_node(Text::new(text::Value::from_segment(
+        label_segment,
+        reader.decoder(),
+    )));
+    let link_ref = if is_image {
+        arena.new_node(Image::from_link(link))
+    } else {
+        arena.new_node(link)
+    };
+    arena[link_ref].set_pos(segment.start());
+    link_ref.append_child_fast(arena, label_text_ref);
+
+    if !is_image {
+        // CommonMark disallows links inside link text; propagate the
+        // descendant marker to any still-open outer link label.
+        ctx.set_has_link_descendant();
+    }
+    Some(link_ref)
+}
+
+/// Parses the `[ref]` tail of a full or collapsed reference link, given the
+/// index of the original link label (used for collapsed references).
+fn parse_reference_link_tail(
+    arena: &Arena,
+    reader: &mut text::BlockReader,
+    label_segment: Segment,
+    ctx: &Context,
+) -> Option<Link> {
+    reader.advance(1); // skip '['
+    let (l, pos) = reader.position();
+    let mut closed = false;
+    let mut opened = 0isize;
+    loop {
+        let c = reader.peek_byte();
+        if c == EOS {
+            break;
+        }
+        if c == b'\\' {
+            reader.advance(1);
+            if reader.peek_byte() == b']' || reader.peek_byte() == b'[' {
+                reader.advance(1);
+                continue;
+            }
+        }
+        if c == b'[' {
+            opened += 1;
+        } else if c == b']' {
+            opened -= 1;
+            if opened < 0 {
+                closed = true;
+                break;
+            }
+        }
+        reader.advance(1);
+    }
+    if !closed {
+        return None;
+    }
+    let mut link_ref_value = reader.between_current(l, pos);
+    reader.advance(1); // skip ']'
+
+    let collapsed = {
+        let maybe_ref = link_ref_value.bytes(reader.source());
+        is_blank(&maybe_ref)
+    };
+    let (def, kind) = {
+        let maybe_ref = if collapsed {
+            // Collapsed reference link: the label is the original link label.
+            link_ref_value = text::Value::from_segment(label_segment, reader.decoder());
+            link_ref_value.bytes(reader.source())
+        } else {
+            link_ref_value.bytes(reader.source())
+        };
+        // CommonMark spec says:
+        //  > A link label can have at most 999 characters inside the square brackets.
+        if maybe_ref.len() > 999 {
+            return None;
+        }
+        let maybe_ref = to_link_reference(maybe_ref);
+        let def = ctx.link_reference(unsafe { core::str::from_utf8_unchecked(&maybe_ref) })?;
+        let kind = if collapsed {
+            LinkReferenceKind::Collapsed
+        } else {
+            LinkReferenceKind::Full
+        };
+        (def, kind)
+    };
+    let ref_def = as_kind_data!(arena, def, LinkReferenceDefinition);
+    Some(match ref_def.title().as_option() {
+        Some(t) => {
+            Link::reference_with_title(ref_def.destination(), link_ref_value, kind, t.clone())
+        }
+        None => Link::reference(ref_def.destination(), link_ref_value, kind),
+    })
+}
+
+/// Parses a shortcut reference link tail, given the index of the label.
+fn parse_shortcut_link_tail(
+    arena: &Arena,
+    reader: &text::BlockReader,
+    label_segment: Segment,
+    ctx: &Context,
+) -> Option<Link> {
+    let ref_value = text::Value::from_segment(label_segment, reader.decoder());
+    let def = {
+        let maybe_ref = ref_value.bytes(reader.source());
+        if maybe_ref.is_empty() || maybe_ref.len() > 999 {
+            return None;
+        }
+        let maybe_ref = to_link_reference(maybe_ref);
+        ctx.link_reference(unsafe { core::str::from_utf8_unchecked(&maybe_ref) })?
+    };
+    let ref_def = as_kind_data!(arena, def, LinkReferenceDefinition);
+    Some(match ref_def.title().as_option() {
+        Some(t) => Link::reference_with_title(
+            ref_def.destination(),
+            ref_value,
+            LinkReferenceKind::Shortcut,
+            t.clone(),
+        ),
+        None => Link::reference(
+            ref_def.destination(),
+            ref_value,
+            LinkReferenceKind::Shortcut,
+        ),
+    })
 }
 
 fn process_link_label_open(

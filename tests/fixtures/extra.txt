@@ -367,7 +367,7 @@ C
 <p>a</p>
 //= = = = = = = = = = = = = = = = = = = = = = = =//
 
-23: Emphasis corner case(yuin/goldmark#245)
+23: Emphasis corner case
 //- - - - - - - - -//
 a* b c d *e*
 //- - - - - - - - -//

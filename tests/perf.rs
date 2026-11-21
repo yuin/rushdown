@@ -1,4 +1,4 @@
-//! Performance regression tests ported from goldmark's `extra_test.go`.
+//! Performance regression tests
 //!
 //! These tests exercise the quadratic-time parsing guards. They are only
 //! compiled in release builds because debug builds are far too slow for the

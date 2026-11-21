@@ -642,7 +642,7 @@ struct LinesIter<'a> {
 
 impl<'a> LinesIter<'a> {
     /// Creates a new LinesIter with the given lines and source.
-    pub fn new(state: LinesIterState<'a>, source: &'a str) -> Self {
+    fn new(state: LinesIterState<'a>, source: &'a str) -> Self {
         LinesIter { state, source }
     }
 }

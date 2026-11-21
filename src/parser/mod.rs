@@ -111,7 +111,7 @@ pub trait GenerateNodeId {
 struct BasicNodeIdGenerator;
 
 impl BasicNodeIdGenerator {
-    pub fn new() -> Self {
+    fn new() -> Self {
         BasicNodeIdGenerator {}
     }
 }
@@ -295,6 +295,7 @@ pub struct Context {
     delimiters: ParseStack<DelimiterTag>,
     link_labels: ParseStack<LinkLabelTag>,
     link_bottoms: ParseStack<LinkBottomTag>,
+    simple_link_triggerable: [bool; 256],
 
     // Caches used to keep pathological inputs from being parsed in quadratic time.
     pub(crate) thematic_break_cache: ThematicBreakCache,
@@ -328,6 +329,7 @@ impl Context {
             delimiters: ParseStack::new(),
             link_labels: ParseStack::new(),
             link_bottoms: ParseStack::new(),
+            simple_link_triggerable: [false; 256],
             thematic_break_cache: ThematicBreakCache::default(),
             raw_html_comment_cache: 0,
             raw_html_processing_instruction_cache: 0,
@@ -486,6 +488,29 @@ impl Context {
     #[inline(always)]
     pub fn is_in_link_label(&self) -> bool {
         self.link_labels().bottom().is_some()
+    }
+
+    /// Returns the bytes that trigger an inline parser for the simple-link
+    /// fast path.
+    #[inline(always)]
+    pub(crate) fn simple_link_triggerable(&self) -> &[bool; 256] {
+        &self.simple_link_triggerable
+    }
+
+    /// Marks every currently open link label as containing a link descendant.
+    ///
+    /// A link inside link text is not allowed by CommonMark. Instead of
+    /// recursively walking the tree when a `]` is reached, the link parser
+    /// records the fact on the label state as soon as a link is parsed.
+    pub(crate) fn set_has_link_descendant(&mut self) {
+        let mut r = self.link_labels.top();
+        while let Some(rf) = r {
+            let prev = self.link_labels.get_elem(rf).and_then(|elem| elem.previous);
+            if let Some(label) = self.link_labels.get_data_mut(rf) {
+                label.set_has_link_descendant();
+            }
+            r = prev;
+        }
     }
 }
 
@@ -710,6 +735,7 @@ pub struct Parser {
     inline_parsers: Vec<AnyInlineParser>,
     inline_parser_index: Vec<Option<Vec<usize>>>,
     triggerable: [bool; 256],
+    simple_link_triggerable: [bool; 256],
 
     tmp_ast_transformers: Option<Vec<Prioritized<AnyAstTransformer>>>,
     ast_transformers: Vec<AnyAstTransformer>,
@@ -913,6 +939,7 @@ impl Parser {
             inline_parsers: Vec::new(),
             inline_parser_index: iter::repeat_n(0, 256).map(|_| None).collect(),
             triggerable: [false; 256],
+            simple_link_triggerable: [false; 256],
 
             tmp_ast_transformers: None,
             ast_transformers: Vec::new(),
@@ -1031,7 +1058,8 @@ impl Parser {
                     self.inline_parsers.push(item);
                 }
             }
-            let has_space_parser = self.inline_parser_index[b' ' as usize].is_some();
+            let space_indices = self.inline_parser_index[b' ' as usize].as_ref();
+            let has_space_parser = space_indices.is_some();
             for c in 0..256 {
                 let ch = c as u8;
                 let punct_trigger = is_punct(ch) && self.inline_parser_index[c].is_some();
@@ -1039,6 +1067,29 @@ impl Parser {
                 if punct_trigger || space_trigger {
                     self.triggerable[c] = true;
                 }
+            }
+
+            // The simple-link fast path bails out when a label byte triggers
+            // an inline parser. The GFM autolink (linkify) parser is special:
+            // it refuses to run inside a link label (`Context::is_in_link_label`),
+            // so a space can never actually start an autolink there. Treat it
+            // as a non-trigger byte for the fast path so labels containing
+            // spaces still take the fast path.
+            let space_triggers_only_linkify = match space_indices {
+                Some(indices) => {
+                    indices.len() == 1
+                        && matches!(
+                            &self.inline_parsers[indices[0]],
+                            AnyInlineParser::Linkify(_)
+                        )
+                }
+                None => true,
+            };
+            for c in 0..256 {
+                self.simple_link_triggerable[c] = self.inline_parser_index[c].is_some();
+            }
+            if space_triggers_only_linkify {
+                self.simple_link_triggerable[b' ' as usize] = false;
             }
         }
         if let Some(mut tmp_ast_transformers) = self.tmp_ast_transformers.take() {
@@ -1137,6 +1188,7 @@ impl Parser {
             text::BasicReader::with_decoder(source, text::Decoder::new(self.options.escaped_space));
         let mut arena = Arena::with_options(self.options.arena);
         let context = &mut Context::new();
+        context.simple_link_triggerable = self.simple_link_triggerable;
         let reg = self.context_key_registry.borrow();
         context.initialize(&reg);
         if let Some(initializer) = options.context_initializer {
@@ -2479,31 +2531,45 @@ impl Delimiter {
 struct LinkLabel {
     is_image: bool,
     is_consumed: bool,
+    has_link_descendant: bool,
 }
 
 impl LinkLabel {
     /// Creates a new LinkLabel.
-    pub fn new(is_image: bool) -> Self {
+    fn new(is_image: bool) -> Self {
         Self {
             is_image,
             is_consumed: false,
+            has_link_descendant: false,
         }
     }
 
     /// Returns true if the link label is for an image, otherwise false.
     #[inline(always)]
-    pub fn is_image(&self) -> bool {
+    fn is_image(&self) -> bool {
         self.is_image
     }
 
     /// Returns true if the link label is already consumed, otherwise false.
-    pub fn is_consumed(&self) -> bool {
+    fn is_consumed(&self) -> bool {
         self.is_consumed
     }
 
     /// Consumes the link label.
-    pub fn consume(&mut self) {
+    fn consume(&mut self) {
         self.is_consumed = true
+    }
+
+    /// Returns true if a link has been parsed inside this label.
+    #[inline(always)]
+    fn has_link_descendant(&self) -> bool {
+        self.has_link_descendant
+    }
+
+    /// Marks this label as containing a link descendant.
+    #[inline(always)]
+    fn set_has_link_descendant(&mut self) {
+        self.has_link_descendant = true
     }
 }
 
@@ -2524,7 +2590,7 @@ impl<S: ParseStackElemSpec> Default for ParseStack<S> {
 
 impl<S: ParseStackElemSpec> ParseStack<S> {
     /// Creates a new ParseStack.
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             elements: Vec::with_capacity(128),
             bottom: None,
@@ -2534,7 +2600,7 @@ impl<S: ParseStackElemSpec> ParseStack<S> {
     }
 
     /// Pushes a new element to the parse stack and returns its reference.
-    pub fn push(&mut self, elem: S::Item, node_ref: NodeRef) -> ParseStackElemRef {
+    fn push(&mut self, elem: S::Item, node_ref: NodeRef) -> ParseStackElemRef {
         let prev = self.top;
         let idx = match prev {
             Some(r) => r.0 + 1,
@@ -2559,13 +2625,13 @@ impl<S: ParseStackElemSpec> ParseStack<S> {
     }
 
     /// Returns reference to the parse stack element.
-    pub fn get_elem(&self, r: ParseStackElemRef) -> Option<&ParseStackElem> {
+    fn get_elem(&self, r: ParseStackElemRef) -> Option<&ParseStackElem> {
         self.elements.get(r.0).and_then(|e| e.as_ref())
     }
 
     /// Returns reference to the parse stack element.
     /// Panics if the reference is invalid.
-    pub fn elem(&self, r: ParseStackElemRef) -> &ParseStackElem {
+    fn elem(&self, r: ParseStackElemRef) -> &ParseStackElem {
         self.get_elem(r).expect("Invalid ParseStackElemRef")
     }
 
@@ -2574,19 +2640,19 @@ impl<S: ParseStackElemSpec> ParseStack<S> {
     }
 
     /// Returns the data of the parse stack element.
-    pub fn get_data(&self, r: ParseStackElemRef) -> Option<&S::Item> {
+    fn get_data(&self, r: ParseStackElemRef) -> Option<&S::Item> {
         self.get_elem(r).and_then(|e| S::unpack(&e.data))
     }
 
     /// Returns the data of the parse stack element.
     /// Panics if the reference is invalid or the data type is mismatched.
-    pub fn data(&self, r: ParseStackElemRef) -> &S::Item {
+    fn data(&self, r: ParseStackElemRef) -> &S::Item {
         self.get_data(r)
             .expect("Invalid ParseStackElemRef or data type mismatch")
     }
 
     /// Returns mutable reference to the data of the parse stack element.
-    pub fn get_data_mut(&mut self, r: ParseStackElemRef) -> Option<&mut S::Item> {
+    fn get_data_mut(&mut self, r: ParseStackElemRef) -> Option<&mut S::Item> {
         self.get_elem_mut(r).and_then(|e| match &mut e.data {
             d if S::unpack(d).is_some() => {
                 // This is safe because we have checked that d is of type S::Item
@@ -2602,23 +2668,23 @@ impl<S: ParseStackElemSpec> ParseStack<S> {
 
     /// Returns mutable reference to the data of the parse stack element.
     /// Panics if the reference is invalid or the data type is mismatched.
-    pub fn data_mut(&mut self, r: ParseStackElemRef) -> &mut S::Item {
+    fn data_mut(&mut self, r: ParseStackElemRef) -> &mut S::Item {
         self.get_data_mut(r)
             .expect("Invalid ParseStackElemRef or data type mismatch")
     }
 
     /// Returns the top element of the parse stack.
-    pub fn top(&self) -> Option<ParseStackElemRef> {
+    fn top(&self) -> Option<ParseStackElemRef> {
         self.top
     }
 
     /// Returns the bottom element of the parse stack.
-    pub fn bottom(&self) -> Option<ParseStackElemRef> {
+    fn bottom(&self) -> Option<ParseStackElemRef> {
         self.bottom
     }
 
     /// Removes the top element from the parse stack.
-    pub fn remove_top(&mut self, arena: &mut Arena) {
+    fn remove_top(&mut self, arena: &mut Arena) {
         if let Some(top_r) = self.top {
             self.remove(arena, top_r);
         }
@@ -2626,7 +2692,7 @@ impl<S: ParseStackElemSpec> ParseStack<S> {
 
     /// Removes the given element from the parse stack.
     /// If the element was not consumed, add remaining segment back to the parent node.
-    pub fn remove(&mut self, arena: &mut Arena, r: ParseStackElemRef) {
+    fn remove(&mut self, arena: &mut Arena, r: ParseStackElemRef) {
         if let Some(elem) = self.elements.get_mut(r.0).and_then(|e| e.take()) {
             if elem.node_ref() != NODE_REF_UNDEFINED {
                 if let Some(remaining) = elem.remaining(arena) {
@@ -2676,7 +2742,7 @@ impl<S: ParseStackElemSpec> ParseStack<S> {
     }
 
     /// Removes elements from the top until the given element is found.
-    pub fn remove_until(&mut self, arena: &mut Arena, r: Option<ParseStackElemRef>) {
+    fn remove_until(&mut self, arena: &mut Arena, r: Option<ParseStackElemRef>) {
         while let Some(top_r) = self.top {
             if Some(top_r) == r {
                 break;

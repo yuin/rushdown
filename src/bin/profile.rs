@@ -42,17 +42,14 @@ fn main() {
             markdown_to_html(&mut out, &s).unwrap()
         }
 
-        match guard.report().build() {
-            Ok(report) => {
-                let mut file = File::create("profile.pb").unwrap();
-                let profile = report.pprof().unwrap();
+        if let Ok(report) = guard.report().build() {
+            let mut file = File::create("profile.pb").unwrap();
+            let profile = report.pprof().unwrap();
 
-                let mut content = Vec::new();
-                profile.encode(&mut content).unwrap();
-                file.write_all(&content).unwrap();
-            }
-            Err(_) => {}
-        };
+            let mut content = Vec::new();
+            profile.encode(&mut content).unwrap();
+            file.write_all(&content).unwrap();
+        }
     }
     println!("end");
 }

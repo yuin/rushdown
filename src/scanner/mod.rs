@@ -2,7 +2,7 @@
 
 mod scanner_gen;
 
-pub use self::scanner_gen::*;
+pub(crate) use self::scanner_gen::*;
 use crate::{
     text::{self, Reader, Segment, EOS},
     util::is_space,
