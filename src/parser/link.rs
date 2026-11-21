@@ -12,6 +12,8 @@ use crate::{
     util::{is_blank, is_punct, is_space, to_link_reference},
 };
 
+const MAX_LINK_DESTINATION_NEST: usize = 32;
+
 /// [`InlineParser`] for links.
 #[derive(Debug, Default)]
 pub struct LinkParser {}
@@ -343,6 +345,9 @@ pub(super) fn parse_link_destination(reader: &mut text::BlockReader) -> Option<t
             if c == b'\\' && i < line.len() - 1 && is_punct(line[i + 1]) {
                 i += 2;
                 continue;
+            } else if c == b'<' {
+                // A pointy-bracket destination must not contain an unescaped '<'.
+                return None;
             } else if c == b'>' {
                 reader.advance(i + 1);
                 return Some(text::Value::from_segment(
@@ -354,7 +359,7 @@ pub(super) fn parse_link_destination(reader: &mut text::BlockReader) -> Option<t
         }
         return None;
     }
-    let mut opened = 0;
+    let mut opened: isize = 0;
     let mut i = 0;
 
     while i < line.len() {
@@ -364,6 +369,9 @@ pub(super) fn parse_link_destination(reader: &mut text::BlockReader) -> Option<t
             continue;
         } else if c == b'(' {
             opened += 1;
+            if opened > MAX_LINK_DESTINATION_NEST as isize {
+                return None;
+            }
         } else if c == b')' {
             opened -= 1;
             if opened < 0 {

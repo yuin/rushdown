@@ -9,7 +9,7 @@ use crate::println;
 use crate::{
     as_kind_data, as_kind_data_mut, as_type_data,
     ast::{Arena, KindData, List, ListItem, NodeRef},
-    context::{BoolValue, ContextKey, ContextKeyRegistry},
+    context::{BoolValue, ContextKey, ContextKeyRegistry, UsizeValue},
     matches_kind,
     parser::{is_thematic_break, matches_setext_heading_bar, BlockParser, Context, State},
     text,
@@ -19,12 +19,14 @@ use crate::{
 
 const SKIP_LIST_PARSER: &str = "_slp";
 const EMPTY_LIST_ITEM_WITH_BLANK_LINES: &str = "_eliwbl";
+const THEMATIC_BREAK_CACHE: &str = "_tbc";
 
 /// [`BlockParser`] for lists.
 #[derive(Debug)]
 pub struct ListParser {
     skip_list_parser: ContextKey<BoolValue>,
     empty_list_item_with_blank_lines: ContextKey<BoolValue>,
+    thematic_break_cache: ContextKey<UsizeValue>,
 }
 
 impl ListParser {
@@ -36,9 +38,13 @@ impl ListParser {
         let empty_list_item_with_blank_lines = reg
             .borrow_mut()
             .get_or_create::<BoolValue>(EMPTY_LIST_ITEM_WITH_BLANK_LINES);
+        let thematic_break_cache = reg
+            .borrow_mut()
+            .get_or_create::<UsizeValue>(THEMATIC_BREAK_CACHE);
         Self {
             skip_list_parser,
             empty_list_item_with_blank_lines,
+            thematic_break_cache,
         }
     }
 }
@@ -96,7 +102,7 @@ impl BlockParser for ListParser {
         reader: &mut text::BasicReader,
         ctx: &mut Context,
     ) -> Option<State> {
-        let Some((line, _)) = reader.peek_line_bytes() else {
+        let Some((line, segment)) = reader.peek_line_bytes() else {
             return Some(State::HAS_CHILDREN);
         };
         if is_blank(&line) {
@@ -143,7 +149,13 @@ impl BlockParser for ListParser {
                             return None;
                         }
                         // Thematic Breaks take precedence over lists
-                        if is_thematic_break(&line[parse_result.marker.start..], 0) {
+                        let mut is_tb = false;
+                        let cache = ctx.get(self.thematic_break_cache).copied().unwrap_or(0);
+                        if segment.stop() > cache {
+                            is_tb = is_thematic_break(&line[parse_result.marker.start..], 0);
+                            ctx.insert(self.thematic_break_cache, segment.stop());
+                        }
+                        if is_tb {
                             let mut is_heading = false;
                             if let Some(last) = ctx.last_opened_block() {
                                 if matches_kind!(arena, last, Paragraph) {

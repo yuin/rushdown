@@ -7,7 +7,7 @@ use crate::{
     ast::{Arena, NodeRef, Text, TextQualifier},
     parser::{Context, Delimiter, DelimiterProcessor, ParseStackElemRef},
     text::{self, Reader, Segment},
-    util::{char_at, is_punct, is_space, is_unicode_space, is_unicode_symbol_or_punct},
+    util::{char_at, is_punct, is_space, is_unicode_space, is_unicode_symbol_or_punct, HashMap},
 };
 
 /// Signature of functions that parse a delimiter run.
@@ -153,6 +153,62 @@ pub fn parse_delimiter_simple<'a>(
     ))
 }
 
+const DELIMITER_CLASS_COUNT: usize = 3;
+
+/// Returns an index that groups closers by whether they can also open and by
+/// their original length modulo 3.
+#[inline(always)]
+fn delimiter_class_index(can_open: bool, original_length_mod3: usize) -> usize {
+    if can_open {
+        original_length_mod3
+    } else {
+        DELIMITER_CLASS_COUNT + original_length_mod3
+    }
+}
+
+/// The lowest opener position that may still match a closer, per delimiter
+/// character and class.
+///
+/// Once a closer fails to find an opener, no later closer of the same character
+/// and class can match an opener before it. Remembering that position keeps
+/// long runs of unmatched delimiters from scanning the same openers over and
+/// over, which would otherwise take quadratic time.
+#[derive(Debug, Default)]
+struct OpenersBottom {
+    asterisk: [usize; DELIMITER_CLASS_COUNT * 2],
+    underscore: [usize; DELIMITER_CLASS_COUNT * 2],
+    tilde: [usize; DELIMITER_CLASS_COUNT * 2],
+    /// Delimiters registered by extensions. This stays empty (and does not
+    /// allocate) unless a non-builtin delimiter is actually used.
+    other: HashMap<u8, [usize; DELIMITER_CLASS_COUNT * 2]>,
+}
+
+impl OpenersBottom {
+    #[inline(always)]
+    fn get(&self, c: u8, index: usize) -> usize {
+        match c {
+            b'*' => self.asterisk[index],
+            b'_' => self.underscore[index],
+            b'~' => self.tilde[index],
+            _ => self.other.get(&c).map_or(0, |bounds| bounds[index]),
+        }
+    }
+
+    #[inline(always)]
+    fn set(&mut self, c: u8, index: usize, lower_bound: usize) {
+        match c {
+            b'*' => self.asterisk[index] = lower_bound,
+            b'_' => self.underscore[index] = lower_bound,
+            b'~' => self.tilde[index] = lower_bound,
+            _ => {
+                self.other
+                    .entry(c)
+                    .or_insert([0; DELIMITER_CLASS_COUNT * 2])[index] = lower_bound
+            }
+        }
+    }
+}
+
 /// Processes the delimiter list in the context.
 /// Processing will be stop when reaching the bottom.
 ///
@@ -182,6 +238,7 @@ pub fn process_delimiters(arena: &mut Arena, bottom: Option<ParseStackElemRef>, 
         ctx.delimiters_mut().remove_until(arena, bottom);
         return;
     };
+    let mut openers_bottom = OpenersBottom::default();
     while let Some(closer_ref) = closer_ref_opt {
         let mut consume = 0usize;
         let mut found = false;
@@ -195,6 +252,11 @@ pub fn process_delimiters(arena: &mut Arena, bottom: Option<ParseStackElemRef>, 
                 closer_ref_opt = closer.next();
                 continue;
             }
+            let closer_char = closer_data.char();
+            let closer_start = closer.index(arena).start();
+            let class_index =
+                delimiter_class_index(closer_data.can_open(), closer_data.length() % 3);
+            let lower_bound = openers_bottom.get(closer_char, class_index);
             opener_ref_opt = closer.previous();
             while let Some(opener_ref) = opener_ref_opt {
                 let opener = ctx.delimiters().elem(opener_ref);
@@ -202,6 +264,9 @@ pub fn process_delimiters(arena: &mut Arena, bottom: Option<ParseStackElemRef>, 
                     if opener_ref == bottom {
                         break;
                     }
+                }
+                if lower_bound != 0 && opener.index(arena).start() < lower_bound - 1 {
+                    break;
                 }
                 let opener_data = ctx.delimiters().data(opener_ref);
                 if opener_data.can_open()
@@ -217,6 +282,9 @@ pub fn process_delimiters(arena: &mut Arena, bottom: Option<ParseStackElemRef>, 
                     }
                 }
                 opener_ref_opt = opener.previous();
+            }
+            if !found {
+                openers_bottom.set(closer_char, class_index, closer_start + 1);
             }
         }
         if !found {

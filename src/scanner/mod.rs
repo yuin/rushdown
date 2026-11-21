@@ -2,13 +2,16 @@
 
 mod scanner_gen;
 
-use memchr::memmem;
-
 pub use self::scanner_gen::*;
 use crate::{
     text::{self, Reader, Segment, EOS},
     util::is_space,
 };
+
+/// Maximum length of an email address: 64 bytes of local part, `@`, and a
+/// domain of at most 255 bytes. [`scan_email`] bounds its scan by this length
+/// so that long runs of email-like text cannot be parsed in quadratic time.
+pub(crate) const EMAIL_SCAN_MAX: usize = 64 + 1 + 255;
 
 /// Trait for scanning input for specific patterns.
 pub trait Scan {
@@ -160,31 +163,6 @@ fn skip_spaces(line: &[u8], pos: usize) -> usize {
         i += 1;
     }
     i - pos
-}
-
-fn scan_open_close<'a>(
-    reader: &mut impl text::Reader<'a>,
-    open: &[u8],
-    close: &[u8],
-) -> Option<()> {
-    let (line, _) = reader.peek_line_bytes()?;
-    let (l, p) = reader.position();
-    if line.starts_with(open) {
-        reader.advance(open.len());
-        loop {
-            let Some((line, _)) = reader.peek_line_bytes() else {
-                reader.set_position(l, p);
-                return None;
-            };
-            if let Some(pos) = memmem::find(&line, close) {
-                reader.advance(pos + close.len());
-                return Some(());
-            }
-            reader.advance(line.len());
-        }
-    }
-    reader.set_position(l, p);
-    None
 }
 
 // }}}
@@ -397,50 +375,6 @@ pub(crate) fn scan_html_tag_reader<'a>(reader: &mut impl text::Reader<'a>) -> Op
         reader.set_position(line, pos);
         None
     })
-}
-
-pub(crate) fn scan_html_comment_reader<'a>(reader: &mut impl text::Reader<'a>) -> Option<()> {
-    let (line, _) = reader.peek_line_bytes()?;
-    if line.starts_with(b"<!-->") {
-        reader.advance(5);
-        return Some(());
-    }
-    if line.starts_with(b"<!--->") {
-        reader.advance(6);
-        return Some(());
-    }
-    scan_open_close(reader, b"<!--", b"-->")
-}
-
-pub(crate) fn scan_html_processing_instruction_reader<'a>(
-    reader: &mut impl text::Reader<'a>,
-) -> Option<()> {
-    scan_open_close(reader, b"<?", b"?>")
-}
-
-pub(crate) fn scan_html_declaration_reader<'a>(reader: &mut impl text::Reader<'a>) -> Option<()> {
-    let (line, _) = reader.peek_line_bytes()?;
-    if !line.starts_with(b"<!") {
-        return None;
-    }
-    let (l, p) = reader.position();
-    reader.advance(2);
-    if !reader.peek_byte().is_ascii_alphabetic() {
-        reader.set_position(l, p);
-        return None;
-    }
-    reader.advance(1);
-    reader.skip_while(|c| c != b'>');
-    if reader.peek_byte() != b'>' {
-        reader.set_position(l, p);
-        return None;
-    }
-    reader.advance(1);
-    Some(())
-}
-
-pub(crate) fn scan_html_cdata_reader<'a>(reader: &mut impl text::Reader<'a>) -> Option<()> {
-    scan_open_close(reader, b"<![CDATA[", b"]]>")
 }
 
 // }}} HTML_block scanners

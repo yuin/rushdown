@@ -272,6 +272,17 @@ pub struct ContextOptions {
 
 //   Context {{{
 
+/// Cache for the last failed thematic break scan.
+///
+/// This is used to avoid scanning the same long line repeatedly while
+/// nested block parsers retry a thematic break.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ThematicBreakCache {
+    pub(crate) stop: usize,
+    pub(crate) mark: u8,
+    pub(crate) brk: Option<usize>,
+}
+
 /// A context for parsing operations.
 pub struct Context {
     base: context::Context,
@@ -284,6 +295,13 @@ pub struct Context {
     delimiters: ParseStack<DelimiterTag>,
     link_labels: ParseStack<LinkLabelTag>,
     link_bottoms: ParseStack<LinkBottomTag>,
+
+    // Caches used to keep pathological inputs from being parsed in quadratic time.
+    pub(crate) thematic_break_cache: ThematicBreakCache,
+    pub(crate) raw_html_comment_cache: usize,
+    pub(crate) raw_html_processing_instruction_cache: usize,
+    pub(crate) raw_html_declaration_cache: usize,
+    pub(crate) raw_html_cdata_cache: usize,
 }
 
 impl Default for Context {
@@ -310,6 +328,11 @@ impl Context {
             delimiters: ParseStack::new(),
             link_labels: ParseStack::new(),
             link_bottoms: ParseStack::new(),
+            thematic_break_cache: ThematicBreakCache::default(),
+            raw_html_comment_cache: 0,
+            raw_html_processing_instruction_cache: 0,
+            raw_html_declaration_cache: 0,
+            raw_html_cdata_cache: 0,
         }
     }
 

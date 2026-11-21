@@ -21,7 +21,7 @@
 #[allow(warnings)] 
 pub(crate) fn scan_email(buffer: &[u8]) -> Option<usize> {
    let mut cursor = 0usize;
-   let limit = buffer.len();
+   let limit = buffer.len().min(crate::scanner::EMAIL_SCAN_MAX);
    let mut marker = 0usize;
    let mut ctxmarker = 0usize;
 
