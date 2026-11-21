@@ -4,11 +4,11 @@ CMARK_BIN=benches/cmark_benchmark
 test: test-nostd
 
 .PHONY: test-nostd
-test-nostd: scanner ## Run tests for no-std
+test-nostd: scanner lint ## Run tests for no-std
 	RUST_BACKTRACE=1 cargo test --no-default-features --features no-std-unix-debug,html-entities -- --nocapture --test-threads=1
 
 .PHONY: test-std
-test-std: scanner ## Run tests for std
+test-std: scanner lint ## Run tests for std
 	yes | RUST_BACKTRACE=1 cargo llvm-cov --branch --ignore-filename-regex='test.rs|gen.rs' -- --nocapture --test-threads=1
 
 .PHONY: fuzz

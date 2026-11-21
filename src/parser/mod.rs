@@ -709,6 +709,7 @@ pub struct Parser {
     tmp_inline_parsers: Option<Vec<Prioritized<AnyInlineParser>>>,
     inline_parsers: Vec<AnyInlineParser>,
     inline_parser_index: Vec<Option<Vec<usize>>>,
+    triggerable: [bool; 256],
 
     tmp_ast_transformers: Option<Vec<Prioritized<AnyAstTransformer>>>,
     ast_transformers: Vec<AnyAstTransformer>,
@@ -768,27 +769,15 @@ pub const PRIORITY_RAW_HTML: u32 = 400;
 /// Priority for emphasis parser.
 pub const PRIORITY_EMPHASIS: u32 = 500;
 
-struct LineStat {
-    pub line_number: usize,
-    pub level: usize,
-    pub is_blank: bool,
-}
-
-fn is_blank_line(line_num: usize, level: usize, stats: &[LineStat]) -> bool {
-    let l = stats.len();
-    if l == 0 {
-        return true;
+fn is_blank_line(level: usize, prev_line_blank: &[bool]) -> bool {
+    let Some(&last) = prev_line_blank.last() else {
+        return false;
+    };
+    if level >= prev_line_blank.len() {
+        last
+    } else {
+        prev_line_blank[level]
     }
-    let lim = l.saturating_sub(1).saturating_sub(level);
-    for i in (0..=lim).rev() {
-        let s = &stats[i];
-        if s.line_number == line_num && s.level <= level {
-            return s.is_blank;
-        } else if s.line_number < line_num {
-            break;
-        }
-    }
-    false
 }
 
 bitflags! {
@@ -923,6 +912,7 @@ impl Parser {
             tmp_inline_parsers: Some(Vec::new()),
             inline_parsers: Vec::new(),
             inline_parser_index: iter::repeat_n(0, 256).map(|_| None).collect(),
+            triggerable: [false; 256],
 
             tmp_ast_transformers: None,
             ast_transformers: Vec::new(),
@@ -1039,6 +1029,15 @@ impl Parser {
                         }
                     }
                     self.inline_parsers.push(item);
+                }
+            }
+            let has_space_parser = self.inline_parser_index[b' ' as usize].is_some();
+            for c in 0..256 {
+                let ch = c as u8;
+                let punct_trigger = is_punct(ch) && self.inline_parser_index[c].is_some();
+                let space_trigger = ch != b'\r' && ch != b'\n' && is_space(ch) && has_space_parser;
+                if punct_trigger || space_trigger {
+                    self.triggerable[c] = true;
                 }
             }
         }
@@ -1326,7 +1325,8 @@ impl Parser {
     ) {
         ctx.opened_blocks.clear();
 
-        let mut blank_lines: Vec<LineStat> = Vec::with_capacity(128);
+        let mut prev_line_blank: Vec<bool> = Vec::new();
+        let mut cur_line_blank: Vec<bool> = Vec::new();
 
         // process blocks separated by blank lines
         loop {
@@ -1341,7 +1341,7 @@ impl Parser {
                 return;
             }
             reader.advance_line();
-            blank_lines.clear();
+            prev_line_blank.clear();
             // process opened blocks line by line
             loop {
                 if ctx.opened_blocks.is_empty() {
@@ -1349,6 +1349,7 @@ impl Parser {
                 }
                 let l = ctx.opened_blocks.len();
                 let mut last_index = l - 1;
+                cur_line_blank.clear();
                 for i in 0..l {
                     let be = ctx.opened_blocks[i];
                     let Some((line, _)) = reader.peek_line_bytes() else {
@@ -1356,12 +1357,7 @@ impl Parser {
                         reader.advance_line();
                         break;
                     };
-                    let (line_num, _) = reader.position();
-                    blank_lines.push(LineStat {
-                        line_number: line_num,
-                        level: i,
-                        is_blank: is_blank(line.as_ref()),
-                    });
+                    cur_line_blank.push(is_blank(line.as_ref()));
                     // If node is a paragraph, open_blocks determines whether it is continuable.
                     // So we do not process paragraphs here.
                     if !matches_kind!(arena, be.n, Paragraph) {
@@ -1370,7 +1366,7 @@ impl Parser {
                             // When current node is a container block and has no children,
                             // we try to open new child nodes
                             if state.contains(State::HAS_CHILDREN) && i == last_index {
-                                let is_blank = is_blank_line(line_num - 1, i + 1, &blank_lines);
+                                let is_blank = is_blank_line(i + 1, &prev_line_blank);
                                 self.open_blocks(arena, be.n, is_blank, reader, ctx);
                                 break;
                             }
@@ -1378,7 +1374,7 @@ impl Parser {
                         }
                     }
                     // current node may be closed or lazy continuation
-                    let is_blank = is_blank_line(line_num - 1, i, &blank_lines);
+                    let is_blank = is_blank_line(i, &prev_line_blank);
                     let mut this_parent_ref = parent_ref;
                     if i != 0 {
                         this_parent_ref = ctx.opened_blocks[i - 1].n;
@@ -1403,6 +1399,7 @@ impl Parser {
                 }
 
                 reader.advance_line();
+                core::mem::swap(&mut prev_line_blank, &mut cur_line_blank);
             }
         }
     }
@@ -1472,50 +1469,52 @@ impl Parser {
                 if c == b'\n' {
                     break;
                 }
-                let is_space = is_space(c) && c != b'\r' && c != b'\n';
-                let is_punct = is_punct(c);
-                if (is_punct && !escaped)
-                    || (is_space && !(escaped && self.options.escaped_space))
-                    || i == 0
-                {
-                    let mut parser_char = c;
-                    if is_space || (i == 0 && !is_punct) {
-                        parser_char = b' ';
-                    }
-                    let ips_idx = &self.inline_parser_index[parser_char as usize];
-                    if let Some(ips_idx) = ips_idx {
-                        block_reader.advance(n);
-                        n = 0;
-                        let (saved_line, saved_position) = block_reader.position();
-                        if i != 0 {
-                            let (_, current_position) = block_reader.position();
-                            if start_position.stop() == current_position.stop() {
-                                let bw = start_position.between(current_position);
-                                block_ref.merge_or_append_text(
-                                    arena,
-                                    bw.into(),
-                                    block_reader.decoder(),
-                                );
-                            }
-                            let (_, sp) = block_reader.position();
-                            start_position = sp;
+                if i == 0 || self.triggerable[c as usize] {
+                    let is_space = is_space(c) && c != b'\r' && c != b'\n';
+                    let is_punct = is_punct(c);
+                    if (is_punct && !escaped)
+                        || (is_space && !(escaped && self.options.escaped_space))
+                        || i == 0
+                    {
+                        let mut parser_char = c;
+                        if is_space || (i == 0 && !is_punct) {
+                            parser_char = b' ';
                         }
-                        let mut inline_node_ref_opt: Option<NodeRef> = None;
-                        for &ip_idx in ips_idx {
-                            let ip = &self.inline_parsers[ip_idx];
-                            inline_node_ref_opt =
-                                ip.parse(arena, block_ref, &mut block_reader, ctx);
-                            if let Some(inline_node_ref) = inline_node_ref_opt {
-                                if !arena[inline_node_ref].has_pos() {
-                                    arena[inline_node_ref].set_pos(saved_position.start());
+                        let ips_idx = &self.inline_parser_index[parser_char as usize];
+                        if let Some(ips_idx) = ips_idx {
+                            block_reader.advance(n);
+                            n = 0;
+                            let (saved_line, saved_position) = block_reader.position();
+                            if i != 0 {
+                                let (_, current_position) = block_reader.position();
+                                if start_position.stop() == current_position.stop() {
+                                    let bw = start_position.between(current_position);
+                                    block_ref.merge_or_append_text(
+                                        arena,
+                                        bw.into(),
+                                        block_reader.decoder(),
+                                    );
                                 }
-                                break;
+                                let (_, sp) = block_reader.position();
+                                start_position = sp;
                             }
-                            block_reader.set_position(saved_line, saved_position);
-                        }
-                        if let Some(inline_node_ref) = inline_node_ref_opt {
-                            block_ref.append_child_fast(arena, inline_node_ref);
-                            continue 'try_lines;
+                            let mut inline_node_ref_opt: Option<NodeRef> = None;
+                            for &ip_idx in ips_idx {
+                                let ip = &self.inline_parsers[ip_idx];
+                                inline_node_ref_opt =
+                                    ip.parse(arena, block_ref, &mut block_reader, ctx);
+                                if let Some(inline_node_ref) = inline_node_ref_opt {
+                                    if !arena[inline_node_ref].has_pos() {
+                                        arena[inline_node_ref].set_pos(saved_position.start());
+                                    }
+                                    break;
+                                }
+                                block_reader.set_position(saved_line, saved_position);
+                            }
+                            if let Some(inline_node_ref) = inline_node_ref_opt {
+                                block_ref.append_child_fast(arena, inline_node_ref);
+                                continue 'try_lines;
+                            }
                         }
                     }
                 }
