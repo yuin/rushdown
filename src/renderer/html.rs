@@ -3,7 +3,7 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
-use alloc::string::{String, ToString};
+use alloc::string::String;
 
 use memchr::memchr;
 
@@ -491,8 +491,18 @@ impl<W: TextWrite> renderer::BuiltinNodesRenderer<W> for BuiltinNodesRenderer<W>
             w.write_str(tag)?;
             if node.is_ordered() && node.start() != 1 {
                 w.write_str(" start=\"")?;
-                let start = node.start().to_string();
-                write_bytes(w, start.as_bytes())?;
+                let mut buf = [0u8; 10];
+                let mut value = node.start();
+                let mut i = buf.len();
+                loop {
+                    i -= 1;
+                    buf[i] = b'0' + (value % 10) as u8;
+                    value /= 10;
+                    if value == 0 {
+                        break;
+                    }
+                }
+                write_bytes(w, &buf[i..])?;
                 w.write_str("\"")?;
             }
             write_attributes!(arena, node_ref, source, w, self.format_options, list);
