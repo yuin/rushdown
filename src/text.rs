@@ -1189,11 +1189,18 @@ impl<'a> Reader<'a> for BasicReader<'a> {
             return;
         }
 
-        self.line_offset = None;
         if n < self.pos.len() && self.pos.padding() == 0 {
+            if let Some(offset) = self.line_offset {
+                if memchr(b'\t', &self.bsource[self.pos.start..self.pos.start + n]).is_some() {
+                    self.line_offset = None;
+                } else {
+                    self.line_offset = Some(offset + n);
+                }
+            }
             self.pos.start += n;
             return;
         }
+        self.line_offset = None;
         let mut n = n;
         while n > 0 && self.pos.start < self.source_length {
             if self.pos.padding != 0 {
@@ -1624,11 +1631,18 @@ impl<'a> Reader<'a> for BlockReader<'a> {
         if self.bsource.is_empty() || self.block.is_empty() {
             return;
         }
-        self.line_offset = None;
         if n < self.pos.len() && self.pos.padding() == 0 {
+            if let Some(offset) = self.line_offset {
+                if memchr(b'\t', &self.bsource[self.pos.start..self.pos.start + n]).is_some() {
+                    self.line_offset = None;
+                } else {
+                    self.line_offset = Some(offset + n);
+                }
+            }
             self.pos.start += n;
             return;
         }
+        self.line_offset = None;
         let mut n = n;
         while n > 0 && self.pos.start < self.last {
             if self.pos.padding != 0 {
@@ -1849,6 +1863,36 @@ mod tests {
     }
 
     #[test]
+    fn test_basic_reader_line_offset() {
+        let buffer = "ab\tcd\nxyz\n";
+        let mut reader = BasicReader::new(buffer);
+        assert_eq!(reader.line_offset(), 0);
+        assert_eq!(reader.line_offset, Some(0));
+
+        // No tab in the advanced range: the cached offset is incremented.
+        reader.advance(2);
+        assert_eq!(reader.line_offset, Some(2));
+        assert_eq!(reader.line_offset(), 2);
+
+        // Crossing a tab invalidates the cached offset; the recomputed value
+        // is the visual column after the tab.
+        reader.advance(1);
+        assert_eq!(reader.line_offset, None);
+        assert_eq!(reader.line_offset(), 2 + util::tab_width(2));
+        assert_eq!(reader.line_offset, Some(2 + util::tab_width(2)));
+
+        // Subsequent tab-free advances keep the offset cached.
+        reader.advance(2);
+        assert_eq!(reader.line_offset, Some(6));
+
+        // Advancing across the line break takes the slow path and resets the
+        // offset to the new line's head.
+        reader.advance(1);
+        assert_eq!(reader.line_offset, None);
+        assert_eq!(reader.line_offset(), 0);
+    }
+
+    #[test]
     fn test_bytes_reader_empty() {
         let buffer = "";
         let mut reader = BasicReader::new(buffer);
@@ -1898,6 +1942,37 @@ mod tests {
         reader.advance(100); // Advance beyond the end
         assert_eq!(reader.peek_byte(), EOS);
         assert!(reader.peek_line_bytes().is_none());
+    }
+
+    #[test]
+    fn test_block_reader_line_offset() {
+        let buffer = "ab\tcd\nxyz\n";
+        let lines = [Segment::new(0, 6), Segment::new(6, 10)];
+        let mut reader = BlockReader::new(buffer, &lines);
+        assert_eq!(reader.line_offset(), 0);
+        assert_eq!(reader.line_offset, Some(0));
+
+        // No tab in the advanced range: the cached offset is incremented.
+        reader.advance(2);
+        assert_eq!(reader.line_offset, Some(2));
+        assert_eq!(reader.line_offset(), 2);
+
+        // Crossing a tab invalidates the cached offset; the recomputed value
+        // is the visual column after the tab.
+        reader.advance(1);
+        assert_eq!(reader.line_offset, None);
+        assert_eq!(reader.line_offset(), 2 + util::tab_width(2));
+        assert_eq!(reader.line_offset, Some(2 + util::tab_width(2)));
+
+        // Subsequent tab-free advances keep the offset cached.
+        reader.advance(2);
+        assert_eq!(reader.line_offset, Some(6));
+
+        // Advancing across the line break takes the slow path and resets the
+        // offset to the new line's head.
+        reader.advance(1);
+        assert_eq!(reader.line_offset, None);
+        assert_eq!(reader.line_offset(), 0);
     }
 
     #[test]
