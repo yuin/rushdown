@@ -140,7 +140,9 @@ impl BlockParser for ListParser {
             .is_some_and(|r| !arena[r].has_children());
         let (indent, _) = indent_width(&line, reader.line_offset());
 
-        if indent < offset || last_is_empty {
+        let empty_with_blank_lines =
+            last_is_empty && matches!(ctx.get(self.empty_list_item_with_blank_lines), Some(true));
+        if indent < offset || empty_with_blank_lines {
             if indent < 4 {
                 if let Some(parse_result) = parse_list_item(&line) {
                     if parse_result.marker.start.saturating_sub(offset) < 4 {
