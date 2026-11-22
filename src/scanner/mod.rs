@@ -174,7 +174,7 @@ include!(concat!(env!("OUT_DIR"), "/allowed_block_tags.rs"));
 pub(crate) fn scan_html_block_open_1(line: &[u8]) -> Option<()> {
     let mut i = not_indented(line)?;
     i += starts_with(line, i, &["<textarea", "<script", "<pre", "<style"], false)?;
-    starts_with(line, i, &["/>", "\r\n", " ", "\t", ">", "\n"], true)?;
+    starts_with(line, i, &["\r\n", " ", "\t", ">", "\n"], true)?;
     Some(())
 }
 
@@ -247,10 +247,7 @@ pub(crate) fn scan_html_block_open_7(line: &[u8]) -> Option<()> {
     let tag_name =
         unsafe { core::str::from_utf8_unchecked(&line[tag_name_start..i]).to_ascii_lowercase() };
     if ALLOWED_BLOCK_TAGS.contains_key(&tag_name)
-        && tag_name != "pre"
-        && tag_name != "script"
-        && tag_name != "style"
-        && tag_name != "textarea"
+        || matches!(tag_name.as_str(), "pre" | "script" | "style" | "textarea")
     {
         return None;
     }

@@ -949,3 +949,27 @@ bar</a></p>
 <p>&quot;x&quot; [b]: /b</p>
 <p><a href="https://example.com/docs">docs</a> [api] <a href="/a">a</a> [b]</p>
 //= = = = = = = = = = = = = = = = = = = = = = = =//
+
+76: self-closing script, pre, style and textarea tags do not start a type 1 HTML block
+//- - - - - - - - -//
+<script/>
+*a*
+
+<pre/>
+*b*
+
+<style/>
+*c*
+
+<textarea/>
+*d*
+//- - - - - - - - -//
+<p><script/>
+<em>a</em></p>
+<p><pre/>
+<em>b</em></p>
+<p><style/>
+<em>c</em></p>
+<p><textarea/>
+<em>d</em></p>
+//= = = = = = = = = = = = = = = = = = = = = = = =//
