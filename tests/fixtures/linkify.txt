@@ -191,3 +191,78 @@ __http://test.com/a/~__
 <strong><a href="http://test.com/">http://test.com/</a>~</strong>
 <strong><a href="http://test.com/a/">http://test.com/a/</a>~</strong></p>
 //= = = = = = = = = = = = = = = = = = = = = = = =//
+
+
+20: Trailing punctuation then unmatched ')' (GFM path validation order)
+//- - - - - - - - -//
+(https://example.org/).
+
+(https://example.org/):
+
+https://example.org/).
+
+(https://example.org/path_(x)).
+//- - - - - - - - -//
+<p>(<a href="https://example.org/">https://example.org/</a>).</p>
+<p>(<a href="https://example.org/">https://example.org/</a>):</p>
+<p><a href="https://example.org/">https://example.org/</a>).</p>
+<p>(<a href="https://example.org/path_(x)">https://example.org/path_(x)</a>).</p>
+//= = = = = = = = = = = = = = = = = = = = = = = =//
+
+
+21: Trailing punctuation exposed by an unmatched ')' is stripped
+//- - - - - - - - -//
+(https://example.com/path.)
+
+(https://example.com/path,)
+
+(www.example.com/x.)
+
+(https://example.com/a&amp;).
+
+(https://example.org/path_(x).)
+//- - - - - - - - -//
+<p>(<a href="https://example.com/path">https://example.com/path</a>.)</p>
+<p>(<a href="https://example.com/path">https://example.com/path</a>,)</p>
+<p>(<a href="http://www.example.com/x">www.example.com/x</a>.)</p>
+<p>(<a href="https://example.com/a">https://example.com/a</a>&amp;).</p>
+<p>(<a href="https://example.org/path_(x)">https://example.org/path_(x)</a>.)</p>
+//= = = = = = = = = = = = = = = = = = = = = = = =//
+
+22: Linkify with emphasis fast path
+//- - - - - - - - -//
+**http://www.example.com/**
+//- - - - - - - - -//
+<p><strong><a href="http://www.example.com/">http://www.example.com/</a></strong></p>
+//= = = = = = = = = = = = = = = = = = = = = = = =//
+
+23: Linkify does not link incomplete URLs
+//- - - - - - - - -//
+see https: and ftp:x
+
+https://
+
+www.
+
+http://localhost
+//- - - - - - - - -//
+<p>see https: and ftp:x</p>
+<p>https://</p>
+<p>www.</p>
+<p><a href="http://localhost">http://localhost</a></p>
+//= = = = = = = = = = = = = = = = = = = = = = = =//
+
+24: Linkify stops at a backslash
+//- - - - - - - - -//
+Docs live at https://example.com/docs\
+next line
+
+see https://example.com\_foo
+
+www.example.com\_bar
+//- - - - - - - - -//
+<p>Docs live at <a href="https://example.com/docs">https://example.com/docs</a><br />
+next line</p>
+<p>see <a href="https://example.com">https://example.com</a>_foo</p>
+<p><a href="http://www.example.com">www.example.com</a>_bar</p>
+//= = = = = = = = = = = = = = = = = = = = = = = =//

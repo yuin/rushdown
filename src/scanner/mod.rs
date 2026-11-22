@@ -382,147 +382,64 @@ pub(crate) fn scan_html_tag_reader<'a>(reader: &mut impl text::Reader<'a>) -> Op
 
 // URL scanners {{{
 
-pub(crate) fn scan_url_www(buffer: &[u8]) -> Option<usize> {
-    let mut i = 0;
-    i += scan_url_www_domain(buffer)?;
-    match scan_url_path(&buffer[i..]) {
-        Some(m) => i += m,
-        None => return None,
+pub(crate) fn scan_protocol_url(buffer: &[u8]) -> Option<usize> {
+    let i = memchr::memchr(b':', buffer)?;
+    if !buffer[i..].starts_with(b"://") || scan_domain(&buffer[i + 3..]).is_none() {
+        return None;
     }
-    Some(i)
+    scan_url(buffer).map(|stop| scan_url_tail(buffer, stop))
 }
 
-pub(crate) fn scan_url_strict(buffer: &[u8]) -> Option<usize> {
-    let mut i = 0;
-    i += skip_while(buffer, 0, |c| c.is_ascii_lowercase(), false)?;
-    i += starts_with(buffer, i, &["://"], false)?;
-    i += scan_url_domain(&buffer[i..])?;
-    match scan_url_path(&buffer[i..]) {
-        Some(m) => i += m,
-        None => return None,
+pub(crate) fn scan_www_url(buffer: &[u8]) -> Option<usize> {
+    let n = scan_domain(buffer)?;
+    if n <= 4 {
+        return None;
     }
-    Some(i)
+    Some(scan_url_tail(buffer, n))
 }
 
-fn scan_url_www_domain(buffer: &[u8]) -> Option<usize> {
-    let mut i = 0;
-    i += starts_with(buffer, 0, &["www"], false)?;
-    let mut last_start = 0usize;
-    let mut last_stop = 0usize;
-    let mut n = 0;
-    while i < buffer.len() {
-        if buffer[i] != b'.'
-            && (!is_domain_safe(buffer[i])
-                || buffer[i] != b'/' && buffer[i] != b'#' && buffer[i] != b'?')
-        {
-            break;
+fn scan_url_tail(buffer: &[u8], stop: usize) -> usize {
+    let mut stop = stop;
+    if stop > 0 {
+        while stop < buffer.len() && !is_space(buffer[stop]) && buffer[stop] != b'<' {
+            stop += 1;
         }
-        i += starts_with(buffer, i, &["."], false)?;
-        match skip_while(buffer, i, is_domain_safe, false) {
+        if let Some(i) = memchr::memchr(b'\\', &buffer[..stop]) {
+            stop = i;
+        }
+    }
+    stop
+}
+
+/// Scans a domain name, like `example.com`; a bare host like `localhost` is also a
+/// domain .
+pub(crate) fn scan_domain(buffer: &[u8]) -> Option<usize> {
+    let mut n = scan_domain_label(buffer)?;
+    while n < buffer.len() && buffer[n] == b'.' {
+        match scan_domain_label(&buffer[n + 1..]) {
             Some(m) => {
-                last_start = i;
-                i += m;
-                n += 1;
-                last_stop = i;
+                n += 1 + m;
+                if n > 255 {
+                    return None;
+                }
             }
             None => break,
         }
     }
-    if n < 2 || matches_tld_and_port(&buffer[last_start..last_stop]).is_none() {
+    Some(n)
+}
+
+fn scan_domain_label(buffer: &[u8]) -> Option<usize> {
+    if !buffer.first()?.is_ascii_alphanumeric() {
         return None;
     }
-    Some(i)
-}
-
-fn is_domain_safe(c: u8) -> bool {
-    c == b'-'
-        || c == b'@'
-        || c == b':'
-        || c == b'%'
-        || c == b'_'
-        || c == b'+'
-        || c == b'~'
-        || c == b'='
-        || c.is_ascii_alphanumeric()
-}
-
-fn scan_url_domain(buffer: &[u8]) -> Option<usize> {
-    let mut i = 0;
-    i += skip_while(buffer, 0, is_domain_safe, false)?;
-    let mut last_start = 0usize;
-    let mut last_stop = 0usize;
-    let mut n = 0;
-    while i < buffer.len() {
-        if buffer[i] != b'.'
-            && (!is_domain_safe(buffer[i])
-                || buffer[i] != b'/' && buffer[i] != b'#' && buffer[i] != b'?')
-        {
-            break;
-        }
-        i += starts_with(buffer, i, &["."], false)?;
-        match skip_while(buffer, i, is_domain_safe, false) {
-            Some(m) => {
-                last_start = i;
-                i += m;
-                n += 1;
-                last_stop = i;
-            }
-            None => break,
-        }
-    }
-
-    if n < 1 || matches_tld_and_port(&buffer[last_start..last_stop]).is_none() {
-        return None;
-    }
-    Some(i)
-}
-
-fn matches_tld_and_port(buffer: &[u8]) -> Option<()> {
-    let mut i = 0;
-    skip_while(buffer, i, |c| c.is_ascii_lowercase(), false)?;
-    if i < buffer.len() && buffer[i] == b':' {
+    let limit = buffer.len().min(63);
+    let mut i = 1;
+    while i < limit && (buffer[i].is_ascii_alphanumeric() || buffer[i] == b'-') {
         i += 1;
-        skip_while(buffer, i, |c| c.is_ascii_digit(), false)?;
     }
-    Some(())
-}
-
-fn scan_url_path(buffer: &[u8]) -> Option<usize> {
-    let mut i = 0;
-    match starts_with(buffer, 0, &["/", "#", "?"], true) {
-        Some(m) => i += m,
-        None => return Some(0),
-    }
-
-    match skip_while(
-        buffer,
-        i,
-        |c| {
-            is_domain_safe(c)
-                || c == b'('
-                || c == b')'
-                || c == b';'
-                || c == b','
-                || c == b'\''
-                || c == b'"'
-                || c == b'>'
-                || c == b'^'
-                || c == b'{'
-                || c == b'}'
-                || c == b'['
-                || c == b']'
-                || c == b'`'
-                || c == b'!'
-                || c == b'?'
-                || c == b'$'
-                || c == b'&'
-                || c == b'~'
-                || c == b'/'
-        },
-        true,
-    ) {
-        Some(m) => i += m,
-        None => i += 0,
+    while i > 1 && buffer[i - 1] == b'-' {
+        i -= 1;
     }
     Some(i)
 }

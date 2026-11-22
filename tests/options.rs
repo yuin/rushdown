@@ -316,10 +316,7 @@ fn test_extension_first_and_last_char() {
     use rushdown::ast::{Arena, Text};
     let mut arena = Arena::new();
     let m = arena.new_node(Mention);
-    let t = arena.new_node(Text::new(rushdown::text::Value::from_string(
-        "ab",
-        rushdown::text::Decoder::Identity,
-    )));
+    let t = arena.new_node(Text::new("ab"));
     m.append_child(&mut arena, t);
     // overridden first_char, default last_char descends into children
     assert_eq!(arena[m].first_char(&arena, ""), Some('@'));
@@ -327,10 +324,7 @@ fn test_extension_first_and_last_char() {
 
     // block nodes do not have inline characters
     let p = arena.new_node(rushdown::ast::Paragraph::new());
-    let t = arena.new_node(Text::new(rushdown::text::Value::from_string(
-        "ab",
-        rushdown::text::Decoder::Identity,
-    )));
+    let t = arena.new_node(Text::new("ab"));
     p.append_child(&mut arena, t);
     assert_eq!(arena[p].first_char(&arena, ""), None);
     assert_eq!(arena[p].last_char(&arena, ""), None);

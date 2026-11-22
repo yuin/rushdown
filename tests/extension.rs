@@ -331,11 +331,7 @@ impl AstTransformer for AdmonitionAstTransformer {
                             let children: Vec<NodeRef> =
                                 arena[bq_ref].children(arena).skip(1).collect();
                             let ad_title_ref = arena.new_node(Paragraph::new());
-                            let text_node_ref =
-                                arena.new_node(Text::new(text::Value::from_string(
-                                    kind.to_uppercase(),
-                                    text::Decoder::Identity,
-                                )));
+                            let text_node_ref = arena.new_node(Text::new(kind.to_uppercase()));
                             ad_title_ref.append_child(arena, text_node_ref);
                             admonition_node_ref.append_child(arena, ad_title_ref);
                             for child_ref in children {

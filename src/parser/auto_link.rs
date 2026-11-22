@@ -39,14 +39,8 @@ impl InlineParser for AutoLinkParser {
                 reader.advance(1);
                 let seg: Segment = (segment.start() + 1, segment.start() + p + 1).into();
                 let seg_text: Segment = (segment.start(), segment.start() + p + 2).into();
-                let node_ref = arena.new_node(Link::auto(
-                    text::Value::from_segment(seg, text::Decoder::Identity),
-                    text::Value::from_segment(seg_text, text::Decoder::Identity),
-                ));
-                let text_ref = arena.new_node(Text::new(text::Value::from_segment(
-                    seg,
-                    text::Decoder::Identity,
-                )));
+                let node_ref = arena.new_node(Link::auto(seg, seg_text));
+                let text_ref = arena.new_node(Text::new(seg));
                 node_ref.append_child_fast(arena, text_ref);
                 return Some(node_ref);
             }
@@ -61,14 +55,8 @@ impl InlineParser for AutoLinkParser {
                 let addr_seg: Segment = (segment.start() + 1, segment.start() + p + 1).into();
                 s.push_str(addr);
                 let seg: Segment = (segment.start(), segment.start() + p + 2).into();
-                let node_ref = arena.new_node(Link::auto(
-                    text::Value::from_string(s, text::Decoder::Identity),
-                    text::Value::from_segment(seg, text::Decoder::Identity),
-                ));
-                let text_ref = arena.new_node(Text::new(text::Value::from_segment(
-                    addr_seg,
-                    text::Decoder::Identity,
-                )));
+                let node_ref = arena.new_node(Link::auto(s, seg));
+                let text_ref = arena.new_node(Text::new(addr_seg));
                 node_ref.append_child_fast(arena, text_ref);
                 return Some(node_ref);
             }

@@ -11,9 +11,8 @@ use alloc::{
 use crate::{
     ast::{Arena, Link, NodeRef, Text},
     parser::{Context, InlineParser, ParserOptions},
-    scanner::{scan_email, scan_url_strict, scan_url_www, Scan},
+    scanner::{scan_email, scan_protocol_url, scan_www_url, Scan},
     text::{self, Reader, Segment},
-    util::trim_right_length,
 };
 
 /// Options for GFM auto links.
@@ -50,8 +49,8 @@ impl Default for LinkifyOptions {
                 "ftp".to_string(),
                 "mailto".to_string(),
             ],
-            url_scanner: Box::new(scan_url_strict),
-            www_scanner: Box::new(scan_url_www),
+            url_scanner: Box::new(scan_protocol_url),
+            www_scanner: Box::new(scan_www_url),
             email_scanner: Box::new(scan_email),
         }
     }
@@ -74,6 +73,59 @@ impl LinkifyParser {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LinkKind {
+    Url,
+    Www,
+    Email,
+}
+
+impl LinkifyParser {
+    fn scan(&self, line: &[u8]) -> Option<(usize, LinkKind)> {
+        let mut found = None;
+        if self
+            .options
+            .allowed_protocols
+            .iter()
+            .any(|p| line.starts_with(p.as_bytes()))
+        {
+            found = self
+                .options
+                .url_scanner
+                .scan(line)
+                .map(|stop| (stop, LinkKind::Url));
+        }
+        if found.is_none() && line.starts_with(b"www.") {
+            found = self
+                .options
+                .www_scanner
+                .scan(line)
+                .map(|stop| (stop, LinkKind::Www));
+        }
+        let (mut stop, kind) = match found {
+            Some(found) => found,
+            None => {
+                let stop = self.options.email_scanner.scan(line)?;
+                let at = memchr::memchr(b'@', &line[..stop])?;
+                memchr::memchr(b'.', &line[at..stop])?;
+                (stop, LinkKind::Email)
+            }
+        };
+        if stop == 0 {
+            return None;
+        }
+        if kind == LinkKind::Email {
+            if line[stop - 1] == b'.' {
+                stop -= 1;
+            }
+            if stop < line.len() && matches!(line[stop], b'-' | b'_') {
+                return None;
+            }
+        }
+        Some((stop, kind))
+    }
+}
+
 impl InlineParser for LinkifyParser {
     fn trigger(&self) -> &[u8] {
         b" *_~("
@@ -89,125 +141,63 @@ impl InlineParser for LinkifyParser {
         if ctx.is_in_link_label() {
             return None;
         }
-        let (line, segment) = reader.peek_line_bytes()?;
+        let (full_line, segment) = reader.peek_line_bytes()?;
         let mut start = 0;
-        let c = line[0];
         // advance if current position is not a line head.
-        if c == b' ' || c == b'*' || c == b'_' || c == b'~' || c == b'(' {
-            start += 1;
+        if matches!(full_line[0], b' ' | b'*' | b'_' | b'~' | b'(') {
+            start = 1;
         }
+        let line = &full_line[start..];
+        let (stop, kind) = self.scan(line)?;
 
-        let mut stop: Option<usize> = None;
-        let mut protocol: Option<String> = None;
-        if self
-            .options
-            .allowed_protocols
-            .iter()
-            .any(|p| line[start..].starts_with(p.as_bytes()))
-        {
-            stop = self
-                .options
-                .url_scanner
-                .scan(&line[start..])
-                .map(|p| start + p);
-        }
-        if stop.is_none() && line[start..].starts_with(b"www.") {
-            stop = self
-                .options
-                .www_scanner
-                .scan(&line[start..])
-                .map(|p| start + p);
-            if stop.is_some() {
-                protocol = Some("http".to_string())
-            }
-        }
-
-        if let Some(mut stop) = stop {
-            let last_char = line[stop - 1];
-            if last_char == b'.' {
-                stop -= 1;
-            } else if last_char == b')' {
-                let mut closing = 0usize;
-                let mut i = stop - 1;
-                while i >= start {
-                    if line[i] == b')' {
-                        closing += 1;
-                    } else if line[i] == b'(' {
-                        closing = closing.saturating_sub(1);
-                    }
-                    if i == 0 {
+        // Strip the trailing punctuation. A ')' is a part of the link only if
+        // it is balanced with a '(' inside of the link, and a ';' only if it
+        // terminates an entity reference.
+        let opening = line[..stop].iter().filter(|&&c| c == b'(').count();
+        let mut closing = line[..stop].iter().filter(|&&c| c == b')').count();
+        let mut i = stop;
+        while i > 1 {
+            match line[i - 1] {
+                b'?' | b'!' | b'.' | b',' | b':' | b'*' | b'_' | b'~' | b'\'' | b'"' => i -= 1,
+                b')' => {
+                    if closing <= opening {
                         break;
                     }
+                    closing -= 1;
                     i -= 1;
                 }
-                if closing > 0 {
-                    stop -= closing;
-                }
-            } else if last_char == b';' {
-                let mut i = stop - 2;
-                while i >= start {
-                    if line[i].is_ascii_alphanumeric() {
-                        if i == 0 {
-                            break;
-                        }
-                        i -= 1;
-                        continue;
+                b';' => {
+                    let mut j = i - 2;
+                    while j > 0 && line[j].is_ascii_alphanumeric() {
+                        j -= 1;
                     }
-                    break;
+                    if j == i - 2 || line[j] != b'&' {
+                        break;
+                    }
+                    i = j;
                 }
-                if i != stop - 2 && line[i] == b'&' {
-                    stop = i;
-                }
+                _ => break,
             }
-            stop -= trim_right_length(&line[..stop], b"?!.,:*_~");
-
-            let label = &line[start..stop];
-            let seg: Segment = (segment.start() + start, segment.start() + stop).into();
-            let dest: text::Value = match protocol {
-                Some(mut p) => {
-                    p.push_str("://");
-                    p.push_str(unsafe { core::str::from_utf8_unchecked(label) });
-                    text::Value::from_string(p, text::Decoder::Identity)
-                }
-                None => text::Value::from_segment(seg, text::Decoder::Identity),
-            };
-            let auto_link_ref = arena.new_node(Link::auto(
-                dest,
-                text::Value::from_segment(seg, text::Decoder::Identity),
-            ));
-            let text_ref = arena.new_node(Text::new(text::Value::from_string(
-                unsafe { core::str::from_utf8_unchecked(label) }.to_string(),
-                text::Decoder::Identity,
-            )));
-            auto_link_ref.append_child_fast(arena, text_ref);
-            if start != 0 {
-                parent_ref.merge_or_append_text(
-                    arena,
-                    (segment.start(), segment.start() + start).into(),
-                    reader.decoder(),
-                );
-            }
-            reader.advance(start + (stop - start));
-            return Some(auto_link_ref);
         }
 
-        let mut stop = self
-            .options
-            .email_scanner
-            .scan(&line[start..])
-            .map(|p| start + p)?;
-        let at = memchr::memchr(b'@', &line)?;
-        memchr::memchr(b'.', &line[at..stop])?;
-        if line[stop - 1] == b'.' {
-            stop -= 1;
-        }
-        if stop < line.len() {
-            let next = line[stop];
-            if next == b'-' || next == b'_' {
-                return None;
+        let label = unsafe { core::str::from_utf8_unchecked(&line[..i]) };
+        let seg: Segment = (segment.start() + start, segment.start() + start + i).into();
+        let dest: text::Value = match kind {
+            LinkKind::Url => seg.into(),
+            LinkKind::Www => {
+                let mut dest = "http://".to_string();
+                dest.push_str(label);
+                dest.into()
             }
-        }
-        stop -= trim_right_length(&line[..stop], b"?!.,:*_~");
+            LinkKind::Email => {
+                let mut dest = "mailto:".to_string();
+                dest.push_str(label);
+                dest.into()
+            }
+        };
+        let auto_link_ref = arena.new_node(Link::auto(dest, seg));
+        let text_ref = arena.new_node(Text::new(label));
+        auto_link_ref.append_child_fast(arena, text_ref);
         if start != 0 {
             parent_ref.merge_or_append_text(
                 arena,
@@ -215,20 +205,7 @@ impl InlineParser for LinkifyParser {
                 reader.decoder(),
             );
         }
-        let label = unsafe { core::str::from_utf8_unchecked(&line[start..stop]) };
-        let seg: Segment = (segment.start() + start, segment.start() + stop).into();
-        let mut dest = "mailto:".to_string();
-        dest.push_str(label);
-        let auto_link_ref = arena.new_node(Link::auto(
-            text::Value::from_string(dest, text::Decoder::Identity),
-            text::Value::from_segment(seg, text::Decoder::Identity),
-        ));
-        let text_ref = arena.new_node(Text::new(text::Value::from_string(
-            label.to_string(),
-            text::Decoder::Identity,
-        )));
-        auto_link_ref.append_child_fast(arena, text_ref);
-        reader.advance(start + (stop - start));
+        reader.advance(start + i);
         Some(auto_link_ref)
     }
 }

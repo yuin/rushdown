@@ -295,10 +295,9 @@ fn generate_auto_heading_id(
         ctx.ids_mut()
             .generate(&content, arena[node_ref].kind_data())
     };
-    arena[node_ref].attributes_mut().insert(
-        "id".to_string(),
-        text::Value::from_string(heading_id, text::Decoder::Identity),
-    );
+    arena[node_ref]
+        .attributes_mut()
+        .insert("id".to_string(), heading_id.into());
 }
 
 fn parse_heading_attributes(
