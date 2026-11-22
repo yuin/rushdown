@@ -470,9 +470,75 @@ impl Value {
     }
 }
 
+/// Creates a value with [`Decoder::Identity`]; the content is not decoded.
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::String(String::from(s), Decoder::Identity)
+    }
+}
+
+/// Creates a value with [`Decoder::Identity`]; the content is not decoded.
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::String(s, Decoder::Identity)
+    }
+}
+
+/// Creates a value with [`Decoder::Identity`]; the content is not decoded.
+impl From<&[u8]> for Value {
+    fn from(s: &[u8]) -> Self {
+        Value::String(String::from_utf8_lossy(s).into_owned(), Decoder::Identity)
+    }
+}
+
+/// Creates a value with [`Decoder::Identity`]; the content is not decoded.
+impl From<Vec<u8>> for Value {
+    fn from(s: Vec<u8>) -> Self {
+        Value::String(String::from_utf8_lossy(&s).into_owned(), Decoder::Identity)
+    }
+}
+
+/// Creates a value with [`Decoder::Identity`]; the content is not decoded.
+impl From<&[char]> for Value {
+    fn from(s: &[char]) -> Self {
+        Value::String(s.iter().collect(), Decoder::Identity)
+    }
+}
+
+/// Creates a value with [`Decoder::Identity`]; the content is not decoded.
+impl From<Cow<'_, [u8]>> for Value {
+    fn from(s: Cow<'_, [u8]>) -> Self {
+        Value::String(String::from_utf8_lossy(&s).into_owned(), Decoder::Identity)
+    }
+}
+
+/// Creates a value with [`Decoder::Identity`]; the content is not decoded.
+impl From<Cow<'_, str>> for Value {
+    fn from(s: Cow<'_, str>) -> Self {
+        Value::String(s.into_owned(), Decoder::Identity)
+    }
+}
+
 impl From<&Value> for Value {
     fn from(v: &Value) -> Self {
         v.clone()
+    }
+}
+
+/// Creates a value with [`Decoder::Identity`]; the content is not decoded.
+impl From<(usize, usize)> for Value {
+    fn from((start, stop): (usize, usize)) -> Self {
+        Value::Index(Index::new(start, stop), Decoder::Identity)
+    }
+}
+
+/// Creates a value with [`Decoder::Identity`]; the content is not decoded.
+impl From<Segment> for Value {
+    fn from(segment: Segment) -> Self {
+        Value::Index(
+            Index::new(segment.start(), segment.stop()),
+            Decoder::Identity,
+        )
     }
 }
 
@@ -1829,6 +1895,35 @@ mod tests {
         assert_eq!(v.value(""), "a &amp; b");
         let v: Value = CodeSpanValue::from_string(String::from("a\nb &amp;")).into();
         assert_eq!(v.value(""), "a b &amp;");
+    }
+
+    #[test]
+    fn test_value_from_identity_decoder() {
+        let raw = "a \\* &amp;";
+        let chars: Vec<char> = raw.chars().collect();
+        let values: [Value; 7] = [
+            raw.into(),
+            String::from(raw).into(),
+            raw.as_bytes().into(),
+            raw.as_bytes().to_vec().into(),
+            chars.as_slice().into(),
+            Cow::Borrowed(raw.as_bytes()).into(),
+            Cow::Borrowed(raw).into(),
+        ];
+        for v in &values {
+            assert_eq!(v.decoder(), Decoder::Identity);
+            // Backslash escapes and entity references are left as-is.
+            assert_eq!(v.value(""), raw);
+        }
+        let index: Value = (0, 1).into();
+        assert_eq!(index.decoder(), Decoder::Identity);
+        let segment: Value = Segment::new(0, 1).into();
+        assert_eq!(segment.decoder(), Decoder::Identity);
+
+        // From<&Value> clones, so it preserves the original decoder.
+        let v = Value::from_string("x", Decoder::Default);
+        let cloned: Value = (&v).into();
+        assert_eq!(cloned.decoder(), Decoder::Default);
     }
 
     #[test]

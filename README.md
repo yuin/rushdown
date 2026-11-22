@@ -401,6 +401,23 @@ walk(&arena, doc_ref, &mut |arena: &Arena,
 assert_eq!(target, Some(arena[arena[doc_ref].first_child().unwrap()].last_child().unwrap()) );
 ```
 
+### Creating `text::Value` values
+
+`text::Value` implements `From` for `&str`, `String`, `&[u8]`, `Vec<u8>`,
+`&[char]`, `Cow<'_, [u8]>`, `Cow<'_, str>`, `(usize, usize)` and `Segment`.
+These implementations always use `Decoder::Identity`: the content is treated
+as already decoded, so backslash escapes and character/entity references are
+**not** resolved.
+
+If the value contains text that should be decoded, do not use these `From`
+implementations (for example, `"a \\* &amp; b".into()`). Use
+`Value::from_string(s, Decoder::Default)`, or `Value::from_index` /
+`Value::from_segment` / `Value::from_indices` with `Decoder::Default`, instead.
+
+The `escaped_space` parser option also matters: when it is enabled, a
+backslash-escaped half-space (`\ `) is decoded into an empty string. In that
+case use `Decoder::EscapedSpace` instead of `Decoder::Default` for values that
+may contain `\ `.
 
 ## Extending rushdown <a name="extending-rushdown"></a>
 See `tests/extension.rs` and `override_renderer.rs` for examples of how to extend rushdown.
