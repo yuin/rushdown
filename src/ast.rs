@@ -1864,6 +1864,10 @@ pub struct CodeBlock {
     value: text::Lines,
 }
 
+fn is_code_block_info_space(c: u8) -> bool {
+    matches!(c, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
+}
+
 impl CodeBlock {
     /// Creates a new [`CodeBlock`] node.
     pub fn new(code_block_kind: CodeBlockKind, info: text::Value) -> Self {
@@ -1913,12 +1917,25 @@ impl CodeBlock {
             return text::Value::Empty;
         }
         let s = self.info.str(source);
-        match (s.find(' '), &self.info) {
-            (None, _) => self.info.clone(),
-            (Some(i), text::Value::Index(idx, d)) => {
-                text::Value::Index(idx.with_stop(idx.start() + i), *d)
-            }
-            (Some(i), v) => text::Value::String(String::from(&s[..i]), v.decoder()),
+        let b = s.as_bytes();
+        let start = b
+            .iter()
+            .position(|c| !is_code_block_info_space(*c))
+            .unwrap_or(b.len());
+        let end = b[start..]
+            .iter()
+            .position(|c| is_code_block_info_space(*c))
+            .map_or(b.len(), |i| start + i);
+        if start == 0 && end == b.len() {
+            return self.info.clone();
+        }
+        match &self.info {
+            text::Value::Index(idx, d) => text::Value::Index(
+                idx.with_start(idx.start() + start)
+                    .with_stop(idx.start() + end),
+                *d,
+            ),
+            v => text::Value::String(String::from(&s[start..end]), v.decoder()),
         }
     }
 }
