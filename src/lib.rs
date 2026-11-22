@@ -472,13 +472,13 @@ macro_rules! as_type_data_mut {
 ///         Paragraph::new(); { |node: &mut Node| {
 ///             node.attributes_mut().insert(
 ///     "class",
-///     rushdown::text::Value::from_string("paragraph", rushdown::text::Decoder::Identity),
+///     "paragraph".into(),
 /// );
 ///         } } => {
-///             Text::new(rushdown::text::Value::from_string("Hello, World!", rushdown::text::Decoder::Identity))
+///             Text::new("Hello, World!")
 ///         },
 ///         Paragraph::new() => {
-///             Text::new(rushdown::text::Value::from_string("This is a test.", rushdown::text::Decoder::Identity))
+///             Text::new("This is a test.")
 ///         }
 ///     }
 /// });
@@ -545,13 +545,13 @@ macro_rules! md_ast {
 ///         Paragraph::new(); { |node: &mut Node| {
 ///             node.attributes_mut().insert(
 ///     "class",
-///     rushdown::text::Value::from_string("paragraph", rushdown::text::Decoder::Identity),
+///     "paragraph".into(),
 /// );
 ///         } } => {
-///             Text::new(rushdown::text::Value::from_string("Hello, World!", rushdown::text::Decoder::Identity))
+///             Text::new("Hello, World!")
 ///         },
 ///         Paragraph::new() => {
-///             Text::new(rushdown::text::Value::from_string("This is a test.", rushdown::text::Decoder::Identity))
+///             Text::new("This is a test.")
 ///         }
 ///     }
 /// });

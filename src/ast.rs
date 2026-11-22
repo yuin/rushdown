@@ -30,7 +30,7 @@
 //! let paragraph_ref = arena.new_node(Paragraph::new());
 //! let seg = Segment::new(0, source.len());
 //! as_type_data_mut!(&mut arena[paragraph_ref], Block).append_source_line(seg);
-//! let text_ref = arena.new_node(Text::new(rushdown::text::Value::from_segment(seg, rushdown::text::Decoder::Identity)));
+//! let text_ref = arena.new_node(Text::new(seg));
 //! paragraph_ref.append_child(&mut arena, text_ref);
 //! doc_ref.append_child(&mut arena, paragraph_ref);
 //!
@@ -1571,9 +1571,9 @@ where
 /// let mut arena = Arena::default();
 /// let doc_ref = arena.new_node(Document::new());
 /// let paragraph_ref1 = arena.new_node(Paragraph::default());
-/// let text1 = arena.new_node(Text::new(rushdown::text::Value::from_string("Hello, World!", rushdown::text::Decoder::Identity)));
+/// let text1 = arena.new_node(Text::new("Hello, World!"));
 /// let paragraph_ref2 = arena.new_node(Paragraph::default());
-/// let text2 = arena.new_node(Text::new(rushdown::text::Value::from_string("This is a test.", rushdown::text::Decoder::Identity)));
+/// let text2 = arena.new_node(Text::new("This is a test."));
 ///
 /// doc_ref.append_child(&mut arena, paragraph_ref1);
 /// paragraph_ref1.append_child(&mut arena, text1);
