@@ -924,3 +924,28 @@ bar</a></p>
 bar</a></p>
 </blockquote>
 //= = = = = = = = = = = = = = = = = = = = = = = =//
+
+74: text after link reference definition title like text
+//- - - - - - - - -//
+[a]: /url
+"title" [b]: /x
+//- - - - - - - - -//
+<p>&quot;title&quot; [b]: /x</p>
+//= = = = = = = = = = = = = = = = = = = = = = = =//
+
+75: Link reference definition after a rejected title is not parsed
+//- - - - - - - - -//
+[docs]: https://example.com/docs
+(see the changelog
+[api]: https://example.com/api
+
+[a]: /a
+"x" [b]: /b
+
+[docs] [api] [a] [b]
+//- - - - - - - - -//
+<p>(see the changelog
+[api]: https://example.com/api</p>
+<p>&quot;x&quot; [b]: /b</p>
+<p><a href="https://example.com/docs">docs</a> [api] <a href="/a">a</a> [b]</p>
+//= = = = = = = = = = = = = = = = = = = = = = = =//

@@ -132,13 +132,15 @@ fn parse_link_reference_definition<'a>(
     reader.skip_spaces();
     let destination = parse_link_destination(reader)?;
 
-    let l = reader.peek_line_bytes();
-    let (line, _) = reader.position();
-    let has_newline = l.is_none_or(|(line, _)| is_blank(&line));
+    let is_new_line = reader
+        .peek_line_bytes()
+        .is_none_or(|(line, _)| is_blank(&line));
+    // `skip_spaces` may cross line breaks, so capture the end line first.
+    let (end_line, _) = reader.position();
     let has_spaces = reader.skip_spaces() > 0;
     let opener = reader.peek_byte();
     if opener != b'"' && opener != b'\'' && opener != b'(' {
-        if !has_newline {
+        if !is_new_line {
             return None;
         }
         let link_ref = arena.new_node(LinkReferenceDefinition::new(label, destination));
@@ -149,25 +151,27 @@ fn parse_link_reference_definition<'a>(
                 .str(reader.source()),
             link_ref,
         );
-        let (end_line, _) = reader.position();
-        return Some((
-            link_ref,
-            start_line,
-            end_line + if end_line != line { 0 } else { 1 },
-        ));
+        return Some((link_ref, start_line, end_line + 1));
     }
 
     if !has_spaces {
         return None;
     }
+    let (saved_line, saved_pos) = reader.position();
     let title_result = parse_link_title(reader);
-    let empty_title = matches!(title_result, ParseLinkTitleResult::Ok(_) if reader.peek_line_bytes().is_some_and(|l| !is_blank(&l.0)))
-        || matches!(title_result, ParseLinkTitleResult::None)
-        || matches!(title_result, ParseLinkTitleResult::Unclosed);
-    if empty_title {
-        if !has_newline {
+    let title_rejected = matches!(
+        &title_result,
+        ParseLinkTitleResult::None | ParseLinkTitleResult::Unclosed
+    ) || matches!(
+        title_result,
+        ParseLinkTitleResult::Ok(_)
+            if reader.peek_line_bytes().is_some_and(|l| !is_blank(&l.0))
+    );
+    if title_rejected {
+        if !is_new_line {
             return None;
         }
+        reader.set_position(saved_line, saved_pos);
         let link_ref = arena.new_node(LinkReferenceDefinition::new(label, destination));
         parent.insert_before(arena, paragraph, link_ref);
         ctx.add_link_reference(
@@ -176,8 +180,7 @@ fn parse_link_reference_definition<'a>(
                 .str(reader.source()),
             link_ref,
         );
-        let (end_line, _) = reader.position();
-        return Some((link_ref, start_line, end_line));
+        return Some((link_ref, start_line, end_line + 1));
     }
     if let ParseLinkTitleResult::Ok(t) = title_result {
         let link_ref = arena.new_node(LinkReferenceDefinition::with_title(label, destination, t));
