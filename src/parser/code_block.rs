@@ -7,7 +7,7 @@ use crate::{
     text,
     text::{Reader as _, Segment},
     util::{
-        indent_position, indent_position_padding, indent_width, is_blank, trim_left_space_length,
+        indent_position_padding, indent_width, is_blank, trim_left_space_length,
         trim_right_space_length,
     },
 };
@@ -35,15 +35,16 @@ impl BlockParser for IndentedCodeBlockParser {
         reader: &mut text::BasicReader,
         _ctx: &mut Context,
     ) -> Option<(NodeRef, State)> {
-        let (line, _) = reader.peek_line_bytes()?;
+        let (line, segment) = reader.peek_line_bytes()?;
+        let (pos, padding) =
+            indent_position_padding(line.as_ref(), reader.line_offset(), segment.padding(), 4)?;
         if is_blank(&line) {
             return None;
         }
-        let (pos, padding) = indent_position(line.as_ref(), reader.line_offset(), 4)?;
         let code_block_ref =
             arena.new_node(CodeBlock::new(CodeBlockKind::Indented, text::Value::Empty));
-        reader.advance_and_set_padding(pos, padding);
-        let mut segment = reader.peek_line_segment().unwrap();
+        let mut segment =
+            text::Segment::new_with_padding(segment.start() + pos, segment.stop(), padding);
         // if code block line starts with a tab, keep a tab as it is.
         if segment.padding() != 0 {
             segment = preserve_leading_tab_in_code_block(&segment, reader, 0);
@@ -62,20 +63,22 @@ impl BlockParser for IndentedCodeBlockParser {
         _ctx: &mut Context,
     ) -> Option<State> {
         let (line, mut segment) = reader.peek_line_bytes()?;
-        if is_blank(&line) {
-            let block = as_type_data_mut!(arena, node_ref, Block);
-            block.append_source_line(segment.trim_left_space_width(4, reader.source()));
-            return Some(State::NO_CHILDREN);
-        }
-        let (pos, padding) = indent_position(line.as_ref(), reader.line_offset(), 4)?;
-        reader.advance_and_set_padding(pos, padding);
-        let seg = reader.peek_line_segment().unwrap();
-        segment = seg;
-        // if code block line starts with a tab, keep a tab as it is.
-        if segment.padding() != 0 {
-            segment = preserve_leading_tab_in_code_block(&segment, reader, 0);
-        }
-        segment = segment.with_force_newline(true);
+        let pos_padding =
+            indent_position_padding(line.as_ref(), reader.line_offset(), segment.padding(), 4);
+        segment = match pos_padding {
+            None if is_blank(&line) => text::Segment::new(segment.stop() - 1, segment.stop()),
+            None => return None,
+            Some((pos, padding)) => {
+                let mut s =
+                    text::Segment::new_with_padding(segment.start() + pos, segment.stop(), padding);
+                s = s.with_force_newline(true);
+                // if code block line starts with a tab, keep a tab as it is.
+                if s.padding() != 0 {
+                    s = preserve_leading_tab_in_code_block(&s, reader, 0);
+                }
+                s
+            }
+        };
         as_type_data_mut!(arena, node_ref, Block).append_source_line(segment);
         reader.advance_to_eol();
         Some(State::NO_CHILDREN)

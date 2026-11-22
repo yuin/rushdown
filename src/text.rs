@@ -952,38 +952,6 @@ impl Segment {
         Segment::new(self.start + l, self.stop)
     }
 
-    /// Returns a new segment by slicing off leading space
-    /// characters until the given width.
-    pub fn trim_left_space_width(&self, mut width: isize, source: &str) -> Segment {
-        let mut padding = self.padding as isize;
-        while width > 0 && padding > 0 {
-            width -= 1;
-            padding -= 1;
-        }
-        if width == 0 {
-            return Segment::new_with_padding(self.start, self.stop, padding as usize);
-        }
-        let v = &source.as_bytes()[self.start..self.stop];
-        let mut start = self.start;
-        for &c in v {
-            if start >= self.stop - 1 || width == 0 {
-                break;
-            }
-            if c == b' ' {
-                width -= 1;
-            } else if c == b'\t' {
-                width -= 4;
-            } else {
-                break;
-            }
-            start += 1;
-        }
-        if width < 0 {
-            padding = -width;
-        }
-        Segment::new_with_padding(start, self.stop, padding as usize)
-    }
-
     /// Returns a new Segment with same value except `start`.
     #[inline(always)]
     pub fn with_start(&self, v: usize) -> Segment {
