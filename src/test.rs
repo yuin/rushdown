@@ -195,7 +195,7 @@ impl MarkdownTestSuite {
                 .unwrap_or(format!("Case {}", no));
             if header.lines().count() > 1 {
                 let attr_line = header.lines().nth(1).unwrap();
-                if let Some(attr_line) = attr_line.strip_prefix("options: ") {
+                if let Some(attr_line) = strip_options_prefix(attr_line) {
                     let mut reader = text::BasicReader::new(attr_line);
                     if let Some(attrs) = parse_attributes(&mut reader) {
                         if let Some(enable_escape) = attrs.get("enableEscape") {
@@ -245,6 +245,17 @@ impl MarkdownTestSuite {
             }
         }
     }
+}
+
+fn strip_options_prefix(line: &str) -> Option<&str> {
+    const PREFIX: &str = "options:";
+    let line = line.trim_start();
+    if line.len() < PREFIX.len()
+        || !line.as_bytes()[..PREFIX.len()].eq_ignore_ascii_case(PREFIX.as_bytes())
+    {
+        return None;
+    }
+    Some(line[PREFIX.len()..].trim_start())
 }
 
 /// Parses the `CASE_NO` environment variable like `CASE_NO=1,2,5` and returns the case numbers.
