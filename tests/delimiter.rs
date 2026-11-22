@@ -1,3 +1,6 @@
+#[cfg(not(debug_assertions))]
+use std::time::Instant;
+
 use rushdown::{
     ast::{Arena, Emphasis, NodeRef},
     new_markdown_to_html_string, parser,

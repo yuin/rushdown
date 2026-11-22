@@ -178,8 +178,6 @@ struct OpenersBottom {
     asterisk: [usize; DELIMITER_CLASS_COUNT * 2],
     underscore: [usize; DELIMITER_CLASS_COUNT * 2],
     tilde: [usize; DELIMITER_CLASS_COUNT * 2],
-    /// Delimiters registered by extensions. This stays empty (and does not
-    /// allocate) unless a non-builtin delimiter is actually used.
     other: HashMap<u8, [usize; DELIMITER_CLASS_COUNT * 2]>,
 }
 
@@ -215,25 +213,17 @@ impl OpenersBottom {
 /// If you implement an inline parser that can have other inline nodes as
 /// children, you should call this function when nesting span has closed.
 pub fn process_delimiters(arena: &mut Arena, bottom: Option<ParseStackElemRef>, ctx: &mut Context) {
-    let Some(last_delimiter_ref) = ctx.last_delimiter() else {
+    if ctx.last_delimiter().is_none() {
         return;
-    };
-    let last_delimiter = ctx.delimiters().elem(last_delimiter_ref);
-    let mut closer_ref_opt: Option<ParseStackElemRef> = None;
-    if let Some(bottom_ref) = bottom {
-        if bottom_ref != last_delimiter_ref {
-            let mut c = last_delimiter.previous();
-            while c.is_some_and(|c| c != bottom_ref) {
-                closer_ref_opt = c;
-                c = ctx
-                    .delimiters()
-                    .get_elem(c.unwrap())
-                    .and_then(|d| d.previous());
-            }
+    }
+    let mut closer_ref_opt: Option<ParseStackElemRef> = if let Some(bottom_ref) = bottom {
+        match ctx.delimiters().get_elem(bottom_ref) {
+            Some(bottom) => bottom.next(),
+            None => ctx.delimiters().bottom(),
         }
     } else {
-        closer_ref_opt = ctx.delimiters().bottom();
-    }
+        ctx.delimiters().bottom()
+    };
     if closer_ref_opt.is_none() {
         ctx.delimiters_mut().remove_until(arena, bottom);
         return;

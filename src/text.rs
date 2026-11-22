@@ -214,6 +214,19 @@ impl CodeSpanValue {
         }
     }
 
+    /// Returns the source range covering all indices if they are contiguous.
+    fn contiguous_range(&self) -> Option<(usize, usize)> {
+        let first = self.indices.first()?;
+        let mut stop = first.stop();
+        for idx in self.indices.iter().skip(1) {
+            if idx.start() != stop {
+                return None;
+            }
+            stop = idx.stop();
+        }
+        Some((first.start(), stop))
+    }
+
     /// Returns the source bytes of this value without normalization.
     pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
         match &self.string {
@@ -222,6 +235,9 @@ impl CodeSpanValue {
                 (None, _) => Cow::Borrowed(&[]),
                 (Some(f), None) => Cow::Borrowed(f.bytes(source)),
                 _ => {
+                    if let Some((start, stop)) = self.contiguous_range() {
+                        return Cow::Borrowed(&source.as_bytes()[start..stop]);
+                    }
                     let mut v = Vec::new();
                     for idx in self.indices.iter() {
                         v.extend_from_slice(idx.bytes(source));
@@ -791,7 +807,7 @@ impl Segment {
             Cow::Borrowed(&source.as_bytes()[self.start..self.stop])
         } else {
             let mut result = Vec::with_capacity(self.padding() + self.stop - self.start + 1);
-            result.extend(core::iter::repeat_n(SPACE[0], self.padding()));
+            result.resize(self.padding(), SPACE[0]);
             result.extend_from_slice(&source.as_bytes()[self.start..self.stop]);
             if self.force_newline && !result.is_empty() && *result.last().unwrap() != b'\n' {
                 result.push(b'\n');
@@ -811,7 +827,8 @@ impl Segment {
             unsafe { Cow::Borrowed(source.get_unchecked(self.start..self.stop)) }
         } else {
             let mut result = String::with_capacity(self.padding() + self.stop - self.start + 1);
-            result.extend(core::iter::repeat_n(' ', self.padding()));
+            // SAFETY: the inserted bytes are ASCII spaces, hence valid UTF-8.
+            unsafe { result.as_mut_vec().resize(self.padding(), SPACE[0]) };
             unsafe { result.push_str(source.get_unchecked(self.start..self.stop)) };
             if self.force_newline && !result.is_empty() && result.as_bytes().last() != Some(&b'\n')
             {
@@ -1052,15 +1069,28 @@ pub trait Reader<'a> {
         let mut i = 0usize;
         loop {
             let b = self.peek_byte();
-            if b == EOS {
+            if b == EOS || !f(b) {
                 break;
             }
-            if f(b) {
+            let (_, seg) = self.position();
+            if seg.padding() == 0 && seg.start() < seg.stop() {
+                let bsource = self.source().as_bytes();
+                let limit = if bsource[seg.stop() - 1] == b'\n' {
+                    seg.stop() - 1
+                } else {
+                    seg.stop()
+                };
+                let mut p = seg.start() + 1;
+                while p < limit && f(bsource[p]) {
+                    p += 1;
+                }
+                let n = p - seg.start();
+                self.advance(n);
+                i += n;
+            } else {
                 i += 1;
                 self.advance(1);
-                continue;
             }
-            break;
         }
         i
     }

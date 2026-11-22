@@ -123,7 +123,7 @@ impl GenerateNodeId for BasicNodeIdGenerator {
         b = trim_left(b, b"0123456789-_");
         b = trim_right(b, b"-_");
         let cw = fold_case_full(b);
-        let mut result = String::new();
+        let mut result = String::with_capacity(cw.len());
         let mut iter = cw.iter().peekable();
         while let Some(&c) = iter.next() {
             if c.is_ascii_lowercase() || c.is_ascii_digit() {
