@@ -68,9 +68,6 @@ fn parse_attribute<'a>(reader: &mut impl text::Reader<'a>) -> Option<(String, te
     if c == b'#' || c == b'.' {
         reader.advance(1);
         let (line, seg) = reader.peek_line_bytes()?;
-        if line.is_empty() {
-            return None;
-        }
         // HTML5 allows any kind of characters as id, but XHTML restricts characters for id.
         // CommonMark is basically defined for XHTML(even though it is legacy).
         // So we restrict id characters.
@@ -80,6 +77,9 @@ fn parse_attribute<'a>(reader: &mut impl text::Reader<'a>) -> Option<(String, te
                 !is_space(b) && (!is_punct(b) || b == b'_' || b == b'-' || b == b':' || b == b'.')
             })
             .count();
+        if i == 0 {
+            return None;
+        }
         reader.advance(i);
         if c == b'#' {
             return Some((
@@ -92,39 +92,39 @@ fn parse_attribute<'a>(reader: &mut impl text::Reader<'a>) -> Option<(String, te
             text::Value::from_segment(seg.with_stop(seg.start() + i), reader.decoder()),
         ));
     }
-    let (line, _) = reader.peek_line_bytes()?;
+    let (line, seg) = reader.peek_line_bytes()?;
     if line.is_empty() {
         return None;
     }
-    let c = line[0];
-    if !(c.is_ascii_alphabetic() || c == b'_' || c == b':') {
+    if invalid_html_attribute_name_byte(line[0]) {
         return None;
     }
     let i = line
         .iter()
-        .take_while(|&&b| {
-            b.is_ascii_alphabetic()
-                || b.is_ascii_digit()
-                || b == b'_'
-                || b == b'-'
-                || b == b':'
-                || b == b'.'
-        })
+        .take_while(|&&b| !invalid_html_attribute_name_byte(b))
         .count();
     let name = &line[0..i];
     reader.advance(i);
     reader.skip_spaces();
     if reader.peek_byte() != b'=' {
-        return None;
+        return Some((
+            String::from_utf8_lossy(name).into_owned(),
+            text::Value::from_segment(seg.with_stop(seg.start() + i), reader.decoder()),
+        ));
     }
     reader.advance(1); // skip '='
     let value = parse_attribute_value(reader)?;
     Some((String::from_utf8_lossy(name).into_owned(), value))
 }
 
+fn invalid_html_attribute_name_byte(b: u8) -> bool {
+    b <= 0x20 || b == 0x7f || matches!(b, b'"' | b'\'' | b'<' | b'>' | b'/' | b'=' | b'}')
+}
+
 fn parse_attribute_value<'a>(reader: &mut impl text::Reader<'a>) -> Option<text::Value> {
     reader.skip_spaces();
     match reader.peek_byte() {
+        text::EOS => None,
         b'"' => parse_quoted_attribute_value(reader, b'"'),
         b'\'' => parse_quoted_attribute_value(reader, b'\''),
         _ => parse_unquoted_attribute_value(reader),
@@ -161,24 +161,12 @@ fn parse_quoted_attribute_value<'a>(
 
 fn parse_unquoted_attribute_value<'a>(reader: &mut impl text::Reader<'a>) -> Option<text::Value> {
     let (line, mut s) = reader.peek_line_bytes()?;
+    // `"`, `\`, `>`, `<`, `=`, `` ` `` and `'` are not allowed in unquoted HTML
+    // attribute values, but most of implementations ignore this rule, so we do too.
     let i = line
         .iter()
-        .take_while(|&&b| {
-            !is_space(b)
-                && b != b'}'
-                && b != b'"'
-                && b != b'\''
-                && b != b'='
-                && b != b'<'
-                && b != b'>'
-                && b != b'`'
-                && b != b','
-        })
+        .take_while(|&&b| !is_space(b) && b != b'}')
         .count();
-
-    if i == 0 {
-        return None;
-    }
     reader.advance(i);
     s = s.with_stop(s.start() + i);
     Some(text::Value::from_segment(s, reader.decoder()))
@@ -240,6 +228,32 @@ mod tests {
         ));
         let (line, _) = reader.peek_line().unwrap();
         assert_eq!(line.as_ref(), " rest");
+    }
+
+    #[test]
+    fn test_parse_attributes_name_grammar() {
+        let source = "{data-attr}";
+        let mut reader = text::BasicReader::new(source);
+        let attrs = parse_attributes(&mut reader).unwrap();
+        assert_eq!(attrs.get("data-attr").unwrap().str(source), "data-attr");
+
+        let source = "{k@y=1}";
+        let mut reader = text::BasicReader::new(source);
+        let attrs = parse_attributes(&mut reader).unwrap();
+        assert_eq!(attrs.get("k@y").unwrap().str(source), "1");
+
+        let source = "{a/b=2}";
+        let mut reader = text::BasicReader::new(source);
+        assert!(parse_attributes(&mut reader).is_none());
+    }
+
+    #[test]
+    fn test_parse_attributes_unquoted_value_stops() {
+        let source = "{a=[1,2] b=x\"y}";
+        let mut reader = text::BasicReader::new(source);
+        let attrs = parse_attributes(&mut reader).unwrap();
+        assert_eq!(attrs.get("a").unwrap().str(source), "[1,2]");
+        assert_eq!(attrs.get("b").unwrap().str(source), "x\"y");
     }
 }
 

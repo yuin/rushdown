@@ -130,8 +130,13 @@ impl BlockParser for AtxHeadingParser {
         reader: &mut text::BasicReader,
         ctx: &mut Context,
     ) {
-        if self.options.auto_heading_ids && arena[node_ref].attributes().get("id").is_none() {
-            generate_auto_heading_id(arena, node_ref, reader, ctx);
+        if self.options.auto_heading_ids {
+            if let Some(id) = arena[node_ref].attributes().get("id") {
+                let id = id.str(reader.source());
+                ctx.ids_mut().put(&id);
+            } else {
+                generate_auto_heading_id(arena, node_ref, reader, ctx);
+            }
         }
     }
 
@@ -238,8 +243,13 @@ impl BlockParser for SetextHeadingParser {
                 }
             }
 
-            if self.options.auto_heading_ids && arena[node_ref].attributes().get("id").is_none() {
-                generate_auto_heading_id(arena, node_ref, reader, ctx);
+            if self.options.auto_heading_ids {
+                if let Some(id) = arena[node_ref].attributes().get("id") {
+                    let id = id.str(reader.source());
+                    ctx.ids_mut().put(&id);
+                } else {
+                    generate_auto_heading_id(arena, node_ref, reader, ctx);
+                }
             }
         }
     }
