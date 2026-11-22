@@ -261,7 +261,11 @@ pub(crate) fn scan_html_block_open_7(line: &[u8]) -> Option<()> {
         }
     }
     i += skip_spaces(line, i);
-    i += starts_with(line, i, &["/>", ">"], false)?;
+    i += if closing {
+        starts_with(line, i, &[">"], false)?
+    } else {
+        starts_with(line, i, &["/>", ">"], false)?
+    };
     i += skip_spaces(line, i);
     (i == line.len()).then_some(())
 }
@@ -356,7 +360,7 @@ pub(crate) fn scan_html_tag_reader<'a>(reader: &mut impl text::Reader<'a>) -> Op
         }
         reader.skip_spaces();
         let c = reader.peek_byte();
-        if c == b'/' {
+        if !closing && c == b'/' {
             reader.advance(1);
             let c = reader.peek_byte();
             if c != b'>' {

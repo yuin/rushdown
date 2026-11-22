@@ -1069,3 +1069,13 @@ t
 <li>x</li>
 </ol>
 //= = = = = = = = = = = = = = = = = = = = = = = =//
+
+79: a closing tag with a self-closing slash is not an HTML block
+//- - - - - - - - -//
+</b/>
+
+x
+//- - - - - - - - -//
+<p>&lt;/b/&gt;</p>
+<p>x</p>
+//= = = = = = = = = = = = = = = = = = = = = = = =//
