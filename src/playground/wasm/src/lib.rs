@@ -2,11 +2,10 @@ use rushdown::{
     ast::pretty_print,
     new_markdown_to_html,
     parser::{
-        self, LinkifyOptions, Parser, ParserExtension, empty_parser_extension, gfm_linkify,
-        gfm_strikethrough, gfm_table, gfm_task_list_item, parser_extension,
+        self, LinkifyOptions, ParseOptions, Parser, ParserExtension, empty_parser_extension,
+        gfm_linkify, gfm_strikethrough, gfm_table, gfm_task_list_item, parser_extension,
     },
     renderer::html,
-    text::BasicReader,
 };
 use wasm_bindgen::prelude::*;
 
@@ -33,9 +32,8 @@ pub fn markdown_to_html(src: &str, options: i32) -> String {
 pub fn markdown_to_ast(src: &str, options: i32) -> String {
     let pext = to_parser_extension(options);
 
-    let mut reader = BasicReader::new(src);
     let parser = Parser::with_extensions(parser::Options::default(), pext);
-    let (arena, document_ref) = parser.parse(&mut reader);
+    let (arena, document_ref) = parser.parse(src, ParseOptions::default());
     let mut out = String::new();
     pretty_print(&mut out, &arena, document_ref, src).unwrap();
     out
