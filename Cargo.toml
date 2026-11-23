@@ -44,7 +44,6 @@ phf = { version = "0.13.1", default-features = false }
 pprof = { version = "0.15", features = ["criterion", "protobuf", "flamegraph", "prost-codec"], optional = true }
 
 [build-dependencies]
-phf = { version = "0.13.1", default-features = false }
 phf_codegen = "0.13.1"
 
 [dev-dependencies]
