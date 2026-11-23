@@ -6,7 +6,6 @@ edition = "2021"
 rust-version = "1.87"
 description = "A 100% CommonMark-compatible GitHub Flavored Markdown parser and renderer"
 documentation = "https://docs.rs/rushdown"
-homepage = "https://github.com/yuin/rushdown"
 repository = "https://github.com/yuin/rushdown"
 readme = "README.md"
 keywords = ["markdown", "commonmark"]
