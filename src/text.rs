@@ -178,115 +178,6 @@ impl Decoder {
 
 // Value {{{
 
-/// A value for inline codes.
-///
-/// This value normalizes its content: line endings are converted to spaces.
-/// Stripping a leading and a trailing space is the responsibility of the creator.
-/// This value is never decoded.
-#[derive(Debug, Clone)]
-pub struct CodeSpanValue {
-    indices: TinyVec<Index>,
-    string: Option<String>,
-}
-
-impl CodeSpanValue {
-    /// Creates a new [`CodeSpanValue`] backed by the source.
-    pub fn from_indices(indices: impl Into<TinyVec<Index>>) -> Self {
-        Self {
-            indices: indices.into(),
-            string: None,
-        }
-    }
-
-    /// Creates a new [`CodeSpanValue`] backed by the given string.
-    pub fn from_string(s: impl Into<String>) -> Self {
-        Self {
-            indices: TinyVec::empty(),
-            string: Some(s.into()),
-        }
-    }
-
-    /// Returns indices of this value if this value is backed by the source.
-    pub fn indices(&self) -> Option<&[Index]> {
-        match &self.string {
-            Some(_) => None,
-            None => Some(self.indices.as_slice()),
-        }
-    }
-
-    /// Returns the source range covering all indices if they are contiguous.
-    fn contiguous_range(&self) -> Option<(usize, usize)> {
-        let first = self.indices.first()?;
-        let mut stop = first.stop();
-        for idx in self.indices.iter().skip(1) {
-            if idx.start() != stop {
-                return None;
-            }
-            stop = idx.stop();
-        }
-        Some((first.start(), stop))
-    }
-
-    /// Returns the source bytes of this value without normalization.
-    pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
-        match &self.string {
-            Some(s) => Cow::Borrowed(s.as_bytes()),
-            None => match (self.indices.get(0), self.indices.get(1)) {
-                (None, _) => Cow::Borrowed(&[]),
-                (Some(f), None) => Cow::Borrowed(f.bytes(source)),
-                _ => {
-                    if let Some((start, stop)) = self.contiguous_range() {
-                        return Cow::Borrowed(&source.as_bytes()[start..stop]);
-                    }
-                    let mut v = Vec::new();
-                    for idx in self.indices.iter() {
-                        v.extend_from_slice(idx.bytes(source));
-                    }
-                    Cow::Owned(v)
-                }
-            },
-        }
-    }
-
-    /// Returns the normalized string value.
-    pub fn value<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
-        let bytes = self.bytes(source);
-        if memchr(b'\n', &bytes).is_none() {
-            return match bytes {
-                Cow::Borrowed(b) => Cow::Borrowed(unsafe { core::str::from_utf8_unchecked(b) }),
-                Cow::Owned(v) => Cow::Owned(unsafe { String::from_utf8_unchecked(v) }),
-            };
-        }
-        let mut v = bytes.into_owned();
-        for b in v.iter_mut() {
-            if *b == b'\n' {
-                *b = b' ';
-            }
-        }
-        Cow::Owned(unsafe { String::from_utf8_unchecked(v) })
-    }
-
-    /// Returns true if the value is empty, otherwise false.
-    pub fn is_empty(&self) -> bool {
-        match &self.string {
-            Some(s) => s.is_empty(),
-            None => self.indices.iter().all(|i| i.is_empty()),
-        }
-    }
-
-    /// Returns the length of the raw value in bytes.
-    pub fn len(&self) -> usize {
-        match &self.string {
-            Some(s) => s.len(),
-            None => self.indices.iter().map(|i| i.len()).sum(),
-        }
-    }
-}
-
-//   }}} ExtensionValue
-
-//   Value {{{
-
 /// An enum represents a string value that can be either an [`Index`], a collection of
 /// [`Index`]s, or a [`String`]. [`Value::Empty`] represents the absence of a value.
 /// [`Value`] does not handle padding.
@@ -547,9 +438,115 @@ impl From<CodeSpanValue> for Value {
         Value::CodeSpan(v)
     }
 }
-//   }}} Value
 
-//   Index {{{
+/// A value for inline codes.
+///
+/// This value normalizes its content: line endings are converted to spaces.
+/// Stripping a leading and a trailing space is the responsibility of the creator.
+/// This value is never decoded.
+#[derive(Debug, Clone)]
+pub struct CodeSpanValue {
+    indices: TinyVec<Index>,
+    string: Option<String>,
+}
+
+impl CodeSpanValue {
+    /// Creates a new [`CodeSpanValue`] backed by the source.
+    pub fn from_indices(indices: impl Into<TinyVec<Index>>) -> Self {
+        Self {
+            indices: indices.into(),
+            string: None,
+        }
+    }
+
+    /// Creates a new [`CodeSpanValue`] backed by the given string.
+    pub fn from_string(s: impl Into<String>) -> Self {
+        Self {
+            indices: TinyVec::empty(),
+            string: Some(s.into()),
+        }
+    }
+
+    /// Returns indices of this value if this value is backed by the source.
+    pub fn indices(&self) -> Option<&[Index]> {
+        match &self.string {
+            Some(_) => None,
+            None => Some(self.indices.as_slice()),
+        }
+    }
+
+    /// Returns the source range covering all indices if they are contiguous.
+    fn contiguous_range(&self) -> Option<(usize, usize)> {
+        let first = self.indices.first()?;
+        let mut stop = first.stop();
+        for idx in self.indices.iter().skip(1) {
+            if idx.start() != stop {
+                return None;
+            }
+            stop = idx.stop();
+        }
+        Some((first.start(), stop))
+    }
+
+    /// Returns the source bytes of this value without normalization.
+    pub fn bytes<'a>(&'a self, source: &'a str) -> Cow<'a, [u8]> {
+        match &self.string {
+            Some(s) => Cow::Borrowed(s.as_bytes()),
+            None => match (self.indices.get(0), self.indices.get(1)) {
+                (None, _) => Cow::Borrowed(&[]),
+                (Some(f), None) => Cow::Borrowed(f.bytes(source)),
+                _ => {
+                    if let Some((start, stop)) = self.contiguous_range() {
+                        return Cow::Borrowed(&source.as_bytes()[start..stop]);
+                    }
+                    let mut v = Vec::new();
+                    for idx in self.indices.iter() {
+                        v.extend_from_slice(idx.bytes(source));
+                    }
+                    Cow::Owned(v)
+                }
+            },
+        }
+    }
+
+    /// Returns the normalized string value.
+    pub fn value<'a>(&'a self, source: &'a str) -> Cow<'a, str> {
+        let bytes = self.bytes(source);
+        if memchr(b'\n', &bytes).is_none() {
+            return match bytes {
+                Cow::Borrowed(b) => Cow::Borrowed(unsafe { core::str::from_utf8_unchecked(b) }),
+                Cow::Owned(v) => Cow::Owned(unsafe { String::from_utf8_unchecked(v) }),
+            };
+        }
+        let mut v = bytes.into_owned();
+        for b in v.iter_mut() {
+            if *b == b'\n' {
+                *b = b' ';
+            }
+        }
+        Cow::Owned(unsafe { String::from_utf8_unchecked(v) })
+    }
+
+    /// Returns true if the value is empty, otherwise false.
+    pub fn is_empty(&self) -> bool {
+        match &self.string {
+            Some(s) => s.is_empty(),
+            None => self.indices.iter().all(|i| i.is_empty()),
+        }
+    }
+
+    /// Returns the length of the raw value in bytes.
+    pub fn len(&self) -> usize {
+        match &self.string {
+            Some(s) => s.len(),
+            None => self.indices.iter().map(|i| i.len()).sum(),
+        }
+    }
+}
+
+// }}} Value
+
+// Index {{{
 
 /// An Index struct holds information about source positions.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -629,9 +626,7 @@ impl From<Segment> for Index {
     }
 }
 
-//   }}} Index
-
-// }}} Value
+// }}} Index
 
 // Segment {{{
 
