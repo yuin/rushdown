@@ -477,6 +477,7 @@ HtmlRenderer constructor function can take these arguments if needed, in any ord
 - [rushdown-definition-list](https://crates.io/crates/rushdown-definition-list): A definition list extension for rushdown.
 - [rushdown-link-attribute](https://crates.io/crates/rushdown-link-attribute): A link attribute extension for rushdown.
 - [rushdown-math](https://crates.io/crates/rushdown-math): A KaTeX parsing extension for rushdown.
+- [rushdown-alert](https://crates.io/crates/rushdown-alert): GitHub style alert extension for rushdown.
 
 ## Donation
 BTC: 1NEDSyUmo4SMTDP83JJQSWi1MvQUGGNMZB
